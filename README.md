@@ -1,5 +1,9 @@
 # Clips
 
+> [!TIP]
+> **Looking for something maintained? Use [Snappy](https://github.com/florentin-leclercq/Snappy).**
+> Snappy is based on this project, runs on Windows and Linux, and is a more complete implementation.
+
 > [!CAUTION]
 > ## ⚠️ 100% VIBE CODED ⚠️
 >
