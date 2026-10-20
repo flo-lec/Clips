@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+"""Enregistrement manuel, en plus du replay : record-clip start | stop | toggle.
+
+Raccourcis globaux : Alt+F9 démarre, Alt+F11 arrête (setup_shortcut.py). Passe par le canal de commande du
+gpu-screen-recorder du replay (aucun second encodage) ; à l'arrêt, gpu-screen-recorder écrit le fichier puis lance
+on_save.py comme pour un replay (renommage selon le jeu, pistes, popup, son).
+"""
+import os
+import subprocess
+import sys
+import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from clips_common import (APP_DIR, extra_monitors, extra_socket, gsr_request, layer_shell_available, load_config,  # noqa: E402
+                          manual_recording_started, play_sound, set_manual_recording, shortcut_label)
+
+
+def tell(title, body="", icon="media-record", sound=None, popup=False):
+    """Retour discret pendant le jeu : son, puis encart par-dessus le jeu ou notification selon les réglages."""
+    cfg = load_config()
+    if sound and cfg.get("save_sound", True):
+        play_sound(sound, cfg.get("sound_volume", 70))
+    if popup and cfg.get("save_popup", True) and layer_shell_available():
+        subprocess.Popen([sys.executable, os.path.join(APP_DIR, "popup.py"), "--message", title, body],
+                         start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return
+    if cfg.get("save_notification", True) or not popup:
+        subprocess.run(["notify-send", "-a", "Clips", "-i", icon, "-t", "3000",
+                        "-h", "string:desktop-entry:local.clips.Clips", title, body],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def videos(folder):
+    try:
+        return [e.path for e in os.scandir(folder) if e.is_file() and e.name.lower().endswith((".mp4", ".mkv"))]
+    except OSError:
+        return []
+
+
+def start():
+    if manual_recording_started() is not None:
+        tell("Enregistrement déjà en cours", f"{shortcut_label('rec_stop')} pour l'arrêter", popup=True)
+        return 0
+    folder = load_config()["clips_dir"]
+    before = set(videos(folder))
+    ok, data = gsr_request("start-replay-recording")
+    if ok:   # autres écrans (sans son) : alignés ensuite grâce à l'horodatage de leur 1re image
+        for mon in extra_monitors(load_config()):
+            gsr_request("start-replay-recording", sock_path=extra_socket(mon))
+    if ok is None:
+        tell("Clips", "Le replay n'est pas actif : active-le dans l'appli Clips pour pouvoir enregistrer.",
+             icon="dialog-warning")
+        return 1
+    if not ok:
+        tell("Impossible de démarrer l'enregistrement", str(data or ""), icon="dialog-error")
+        return 1
+    started = time.time()
+    set_manual_recording(started)
+    tell("Enregistrement lancé", f"{shortcut_label('rec_stop')} pour l'arrêter", sound="highlight", popup=True)
+    # Le fichier apparaît dans le dossier dès le début : on le note pour que la bibliothèque l'affiche « En cours »
+    # (grisé, pas encore lisible) au lieu d'un clip incomplet.
+    for _ in range(40):
+        new = [p for p in videos(folder) if p not in before and not os.path.basename(p).startswith("Replay_")]
+        if new:
+            set_manual_recording(started, max(new, key=os.path.getmtime))
+            break
+        time.sleep(0.1)
+    return 0
+
+
+def stop():
+    started = manual_recording_started()
+    # Réponse envoyée une fois le fichier écrit (et on_save.py lancé) : on laisse le temps aux longues vidéos.
+    # Autres écrans d'abord : leurs fichiers sont complets quand on_save.py (lancé par l'écran principal)
+    # les rattache.
+    for mon in extra_monitors(load_config()):
+        gsr_request("stop-replay-recording", timeout=120, sock_path=extra_socket(mon))
+    ok, data = gsr_request("stop-replay-recording", timeout=120)
+    set_manual_recording(None)
+    if ok is None:
+        tell("Clips", "Le replay n'est pas actif.", icon="dialog-warning")
+        return 1
+    if not ok:
+        if started is None:
+            tell("Aucun enregistrement en cours", f"{shortcut_label('rec_start')} pour en lancer un", popup=True)
+        else:
+            tell("Échec de l'arrêt de l'enregistrement", str(data or ""), icon="dialog-error")
+        return 1
+    return 0   # la suite (popup « Enregistrement sauvegardé », son) est faite par on_save.py
+
+
+if __name__ == "__main__":
+    action = sys.argv[1] if len(sys.argv) > 1 else "toggle"
+    if action == "toggle":
+        action = "stop" if manual_recording_started() is not None else "start"
+    if action not in ("start", "stop"):
+        print(__doc__)
+        sys.exit(2)
+    sys.exit(start() if action == "start" else stop())

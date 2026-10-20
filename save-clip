@@ -1,0 +1,5 @@
+#!/bin/sh
+# Raccourci « Sauvegarder un clip » : demande au replay d'écrire les dernières secondes.
+if ! systemctl --user kill -s USR1 --kill-whom=main clips-recorder.service 2>/dev/null; then
+    notify-send -a Clips -i dialog-warning "Clips" "Le replay n'est pas actif. Active-le dans l'appli Clips."
+fi
