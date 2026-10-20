@@ -1,4 +1,4 @@
-"""Préférences : sources audio (façon Moments), enregistrement, raccourci, partage."""
+"""Preferences: audio sources (Moments-style), recording, shortcut, sharing."""
 import json
 import os
 
@@ -19,13 +19,13 @@ RECORDER_KEYS = ("monitor", "extra_monitors", "replay_seconds", "fps", "quality"
 
 class Preferences(Adw.PreferencesDialog):
     FPS = [30, 60, 120, 144, 165, 240]
-    QUALITY = [("medium", "Moyenne"), ("high", "Haute"), ("very_high", "Très haute"), ("ultra", "Ultra")]
-    GAME_MODES = [("except_chat", "Tout le son du PC sauf le chat vocal"),
-                  ("all", "Tout le son du PC"),
-                  ("app", "Une seule application")]
+    QUALITY = [("medium", "Medium"), ("high", "High"), ("very_high", "Very high"), ("ultra", "Ultra")]
+    GAME_MODES = [("except_chat", "All PC audio except voice chat"),
+                  ("all", "All PC audio"),
+                  ("app", "A single application")]
 
     def __init__(self, window):
-        super().__init__(title="Préférences", search_enabled=False)
+        super().__init__(title="Preferences", search_enabled=False)
         self.win = window
         self.cfg = load_config()
         self.before = json.dumps({k: self.cfg[k] for k in RECORDER_KEYS}, sort_keys=True)
@@ -36,20 +36,20 @@ class Preferences(Adw.PreferencesDialog):
         run_async(["gpu-screen-recorder", "--list-audio-devices"], self._got_devices)
         run_async(["gpu-screen-recorder", "--list-monitors"], self._got_monitors)
 
-    # ---- page Sources (façon Moments)
+    # ---- Sources page (Moments-style)
     def _page_sources(self):
-        page = Adw.PreferencesPage(title="Sources audio", icon_name="audio-speakers-symbolic")
+        page = Adw.PreferencesPage(title="Audio sources", icon_name="audio-speakers-symbolic")
         src = self.cfg["sources"]
         g = Adw.PreferencesGroup(
-            title="Pistes enregistrées",
-            description="Comme dans Moments, chaque source a sa propre piste, réglable ensuite dans l'éditeur. "
-                        "Rien n'est rerouté : tes sorties et entrées audio restent exactement comme elles sont.")
+            title="Recorded tracks",
+            description="Like in Moments, each source has its own track, adjustable later in the editor. "
+                        "Nothing is rerouted: your audio outputs and inputs stay exactly as they are.")
 
-        # Jeu
-        self.game_row = Adw.ExpanderRow(title="Jeu", show_enable_switch=True,
+        # Game
+        self.game_row = Adw.ExpanderRow(title="Game", show_enable_switch=True,
                                         enable_expansion=src["game"]["enabled"], expanded=True)
         self.game_row.add_prefix(Gtk.Image(icon_name=SOURCE_ICONS["game"]))
-        self.game_mode = Adw.ComboRow(title="Capter", model=Gtk.StringList.new([l for _, l in self.GAME_MODES]))
+        self.game_mode = Adw.ComboRow(title="Capture", model=Gtk.StringList.new([l for _, l in self.GAME_MODES]))
         modes = [k for k, _ in self.GAME_MODES]
         self.game_mode.set_selected(modes.index(src["game"]["mode"]) if src["game"]["mode"] in modes else 0)
         self.game_app = Adw.ComboRow(title="Application")
@@ -58,8 +58,8 @@ class Preferences(Adw.PreferencesDialog):
         self.game_row.add_row(self._level_row("game"))
         g.add(self.game_row)
 
-        # Chat vocal
-        self.chat_row = Adw.ExpanderRow(title="Chat vocal", subtitle="Discord, Vesktop…", show_enable_switch=True,
+        # Voice chat
+        self.chat_row = Adw.ExpanderRow(title="Voice chat", subtitle="Discord, Vesktop…", show_enable_switch=True,
                                          enable_expansion=src["chat"]["enabled"], expanded=True)
         self.chat_row.add_prefix(Gtk.Image(icon_name=SOURCE_ICONS["chat"]))
         self.chat_app = Adw.ComboRow(title="Application")
@@ -67,31 +67,31 @@ class Preferences(Adw.PreferencesDialog):
         self.chat_row.add_row(self._level_row("chat"))
         g.add(self.chat_row)
 
-        # Micro
-        self.mic_row = Adw.ExpanderRow(title="Micro", show_enable_switch=True,
+        # Mic
+        self.mic_row = Adw.ExpanderRow(title="Mic", show_enable_switch=True,
                                        enable_expansion=src["mic"]["enabled"], expanded=True)
         self.mic_row.add_prefix(Gtk.Image(icon_name=SOURCE_ICONS["mic"]))
-        self.mic_dev = Adw.ComboRow(title="Périphérique")
+        self.mic_dev = Adw.ComboRow(title="Device")
         self.mic_row.add_row(self.mic_dev)
         self.mic_row.add_row(self._level_row("mic"))
         g.add(self.mic_row)
         page.add(g)
 
-        # Avancé : une piste par application (Spotify, navigateur, jeu…)
+        # Advanced: one track per application (Spotify, browser, game…)
         gs = Adw.PreferencesGroup(
-            title="Une piste par application",
-            description="Option avancée : chaque application cochée a sa propre piste, réglable séparément dans "
-                        "l'éditeur. Le reste du son va dans « Autres sons ». Les applis sont reconnues par leur nom, "
-                        "même si elles sont lancées plus tard.")
+            title="One track per application",
+            description="Advanced option: each checked application gets its own track, adjustable separately in "
+                        "the editor. The rest of the audio goes to \"Other sounds\". Apps are recognized by their name, "
+                        "even if they are started later.")
         refresh = Gtk.Button(icon_name="view-refresh-symbolic", css_classes=["flat"], valign=Gtk.Align.CENTER,
-                             tooltip_text="Chercher les applications qui jouent du son")
+                             tooltip_text="Look for applications playing audio")
         refresh.connect("clicked", lambda *_: run_async(["gpu-screen-recorder", "--list-application-audio"], self._got_apps))
         gs.set_header_suffix(refresh)
-        self.split_row = Adw.SwitchRow(title="Séparer les applications", active=src["split"]["enabled"],
-                                       subtitle="Désactivé : tout le son des applis va dans la piste Jeu")
+        self.split_row = Adw.SwitchRow(title="Split applications", active=src["split"]["enabled"],
+                                       subtitle="Off: all app audio goes to the Game track")
         self.split_row.connect("notify::active", self._on_split)
         gs.add(self.split_row)
-        self.add_app = Adw.EntryRow(title="Ajouter une application par son nom", show_apply_button=True)
+        self.add_app = Adw.EntryRow(title="Add an application by name", show_apply_button=True)
         self.add_app.connect("apply", self._add_split_app)
         gs.add(self.add_app)
         self.split_group = gs
@@ -114,7 +114,7 @@ class Preferences(Adw.PreferencesDialog):
         self._on_game_mode(self.game_mode, None, save=False)
         return page
 
-    # ---- pistes par application
+    # ---- per-application tracks
     def _fill_split(self, detected):
         split = self.cfg["sources"]["split"]
         chat = self.cfg["sources"]["chat"]["app"].lower()
@@ -123,10 +123,10 @@ class Preferences(Adw.PreferencesDialog):
         for name in names:
             if name.lower() == chat or name in self.split_rows:
                 if name in self.split_rows and name in detected:
-                    self.split_rows[name].set_subtitle("Joue du son en ce moment")
+                    self.split_rows[name].set_subtitle("Playing audio right now")
                 continue
             row = Adw.SwitchRow(title=name, active=name in split["apps"],
-                                subtitle="Joue du son en ce moment" if name in detected else "")
+                                subtitle="Playing audio right now" if name in detected else "")
             row.add_prefix(Gtk.Image(icon_name=SOURCE_ICONS["app"]))
             row.connect("notify::active", lambda r, _, n=name: self._toggle_split_app(n, r.get_active()))
             self.split_rows[name] = row
@@ -166,7 +166,7 @@ class Preferences(Adw.PreferencesDialog):
             self._fill_split([])
 
     def _level_row(self, kind):
-        row = Adw.ActionRow(title="Niveau par défaut", subtitle="Appliqué à l'ouverture d'un clip dans l'éditeur")
+        row = Adw.ActionRow(title="Default level", subtitle="Applied when a clip is opened in the editor")
         scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 200, 5)
         scale.set_value(round(self.cfg["levels"].get(kind, 1.0) * 100))
         scale.set_size_request(160, -1)
@@ -202,23 +202,23 @@ class Preferences(Adw.PreferencesDialog):
         chat = s["chat"]["app"] if s["chat"]["enabled"] else ""
         mode = s["game"]["mode"]
         if mode == "app" and s["game"]["app"]:
-            game = f"Seulement {s['game']['app']}"
+            game = f"Only {s['game']['app']}"
         elif mode == "except_chat" and chat:
-            game = f"Tout le son du PC sauf {chat}"
+            game = f"All PC audio except {chat}"
         else:
-            game = "Tout le son du PC"
-        self.game_row.set_subtitle(game if s["game"]["enabled"] else "Désactivé")
-        self.chat_row.set_subtitle(chat or "Désactivé")
+            game = "All PC audio"
+        self.game_row.set_subtitle(game if s["game"]["enabled"] else "Off")
+        self.chat_row.set_subtitle(chat or "Off")
         dev = s["mic"]["device"]
-        label = next((d for n, d in self.devices if n == dev), "Entrée par défaut" if dev == "default_input" else dev)
-        self.mic_row.set_subtitle(label if s["mic"]["enabled"] else "Désactivé")
+        label = next((d for n, d in self.devices if n == dev), "Default input" if dev == "default_input" else dev)
+        self.mic_row.set_subtitle(label if s["mic"]["enabled"] else "Off")
 
     def _fill_apps(self, detected):
         self.filling = True
         s = self.cfg["sources"]
         base = [s["chat"]["app"], "vesktop", "discord", "WEBRTC VoiceEngine"]
         self.chat_apps = list(dict.fromkeys(a for a in base + detected if a))
-        self.apps = list(dict.fromkeys(a for a in [s["game"]["app"]] + detected if a)) or ["(aucune appli détectée)"]
+        self.apps = list(dict.fromkeys(a for a in [s["game"]["app"]] + detected if a)) or ["(no app detected)"]
         for row, values, current in ((self.chat_app, self.chat_apps, s["chat"]["app"]),
                                      (self.game_app, self.apps, s["game"]["app"])):
             row.set_model(Gtk.StringList.new(values))
@@ -230,7 +230,7 @@ class Preferences(Adw.PreferencesDialog):
     def _fill_devices(self, devices):
         self.filling = True
         cur = self.cfg["sources"]["mic"]["device"]
-        self.devices = [("default_input", "Entrée par défaut du système")] + devices
+        self.devices = [("default_input", "System default input")] + devices
         if cur not in [n for n, _ in self.devices]:
             self.devices.append((cur, cur))
         self.mic_dev.set_model(Gtk.StringList.new([d for _, d in self.devices]))
@@ -255,51 +255,51 @@ class Preferences(Adw.PreferencesDialog):
                     devs.append((name, desc or name))
             self._fill_devices(devs)
 
-    # ---- page Enregistrement
+    # ---- Recording page
     def _page_recording(self):
-        page = Adw.PreferencesPage(title="Enregistrement", icon_name="camera-video-symbolic")
-        lib = Adw.PreferencesGroup(title="Bibliothèque")
-        game = Adw.SwitchRow(title="Détecter le jeu", active=self.cfg.get("detect_game", True),
-                             subtitle="Nomme chaque clip d'après le jeu Steam en cours et ajoute un filtre par jeu. "
-                                      "Ne touche à aucune fenêtre.")
+        page = Adw.PreferencesPage(title="Recording", icon_name="camera-video-symbolic")
+        lib = Adw.PreferencesGroup(title="Library")
+        game = Adw.SwitchRow(title="Detect the game", active=self.cfg.get("detect_game", True),
+                             subtitle="Names each clip after the running Steam game and adds a per-game filter. "
+                                      "Doesn't touch any window.")
         game.connect("notify::active", lambda r, _: self._set("detect_game", r.get_active()))
         lib.add(game)
         page.add(lib)
-        rec = Adw.PreferencesGroup(title="Replay", description="Les dernières secondes restent en mémoire vive ; rien n'est écrit tant que tu ne sauvegardes pas.")
+        rec = Adw.PreferencesGroup(title="Replay", description="The last seconds stay in RAM; nothing is written until you save.")
         self.monitors = [self.cfg["monitor"]]
-        self.mon_row = Adw.ComboRow(title="Écran", subtitle="Avec le son",
+        self.mon_row = Adw.ComboRow(title="Screen", subtitle="With audio",
                                     model=Gtk.StringList.new([self.cfg["monitor"]]))
         rec.add(self.mon_row)
-        # Autres écrans filmés en même temps (sans son) : autant qu'on veut, cochés dans la liste.
-        self.extra_row = Adw.ExpanderRow(title="Autres écrans filmés",
-                                         subtitle="Dans l'éditeur, bascule d'un écran à l'autre ou exporte celui que "
-                                                  "tu veux")
+        # Other screens recorded at the same time (no audio): as many as you want, checked in the list.
+        self.extra_row = Adw.ExpanderRow(title="Other recorded screens",
+                                         subtitle="In the editor, switch from one screen to another or export the one "
+                                                  "you want")
         self.extra_checks = []
         rec.add(self.extra_row)
         dur = Adw.SpinRow.new_with_range(5, 600, 5)
-        dur.set_title("Durée gardée (secondes)")
+        dur.set_title("Kept duration (seconds)")
         dur.set_value(self.cfg["replay_seconds"])
         dur.connect("notify::value", lambda r, _: self._set("replay_seconds", int(r.get_value())))
         rec.add(dur)
-        rec.add(self._combo("Images par seconde", [str(f) for f in self.FPS], self.FPS, "fps"))
-        rec.add(self._combo("Qualité", [l for _, l in self.QUALITY], [k for k, _ in self.QUALITY], "quality"))
+        rec.add(self._combo("Frames per second", [str(f) for f in self.FPS], self.FPS, "fps"))
+        rec.add(self._combo("Quality", [l for _, l in self.QUALITY], [k for k, _ in self.QUALITY], "quality"))
         rec.add(self._combo("Codec", [l for _, l in CODECS], [k for k, _ in CODECS], "codec"))
         page.add(rec)
 
-        fb = Adw.PreferencesGroup(title="Confirmation de sauvegarde")
-        # Son : interrupteur + choix + écoute
-        snd = Adw.ExpanderRow(title="Son", subtitle="Joué quand un clip est sauvegardé",
+        fb = Adw.PreferencesGroup(title="Save confirmation")
+        # Sound: switch + choice + preview
+        snd = Adw.ExpanderRow(title="Sound", subtitle="Played when a clip is saved",
                               show_enable_switch=True, enable_expansion=self.cfg.get("save_sound", True))
         snd.connect("notify::enable-expansion", lambda r, _: self._set("save_sound", r.get_enable_expansion()))
         sounds = available_sounds()
         keys = [k for k, _l, _p in sounds]
-        choice = Adw.ComboRow(title="Son choisi", model=Gtk.StringList.new([l for _k, l, _p in sounds]))
+        choice = Adw.ComboRow(title="Chosen sound", model=Gtk.StringList.new([l for _k, l, _p in sounds]))
         if self.cfg.get("sound") in keys:
             choice.set_selected(keys.index(self.cfg["sound"]))
         choice.connect("notify::selected", lambda r, _: (self._set("sound", keys[r.get_selected()]),
                                                          play_sound(keys[r.get_selected()], int(scale.get_value()))))
         listen = Gtk.Button(icon_name="media-playback-start-symbolic", valign=Gtk.Align.CENTER,
-                            css_classes=["flat", "circular"], tooltip_text="Écouter")
+                            css_classes=["flat", "circular"], tooltip_text="Listen")
         listen.connect("clicked", lambda *_: play_sound(keys[choice.get_selected()], int(scale.get_value())))
         choice.add_suffix(listen)
         snd.add_row(choice)
@@ -315,7 +315,7 @@ class Preferences(Adw.PreferencesDialog):
             v = int(sc.get_value())
             pct.set_label(f"{v} %")
             self._set("sound_volume", v)
-            if self._vol_preview:   # écoute au relâchement (pas à chaque cran)
+            if self._vol_preview:   # preview on release (not at every notch)
                 GLib.source_remove(self._vol_preview)
             self._vol_preview = GLib.timeout_add(350, lambda: (play_sound(keys[choice.get_selected()], v),
                                                                setattr(self, "_vol_preview", 0), False)[2])
@@ -325,37 +325,37 @@ class Preferences(Adw.PreferencesDialog):
         vol.add_suffix(pct)
         snd.add_row(vol)
         fb.add(snd)
-        # Popup par-dessus le jeu
+        # Popup over the game
         ok = layer_shell_available()
-        pop = Adw.SwitchRow(title="Popup à l'écran", active=self.cfg.get("save_popup", True),
-                            subtitle="Petit encart « Clip enregistré » par-dessus le jeu, sans lui prendre le focus"
-                            if ok else "Nécessite gtk4-layer-shell (sudo pacman -S gtk4-layer-shell)")
+        pop = Adw.SwitchRow(title="On-screen popup", active=self.cfg.get("save_popup", True),
+                            subtitle="Small \"Clip saved\" toast over the game, without stealing its focus"
+                            if ok else "Requires gtk4-layer-shell (sudo pacman -S gtk4-layer-shell)")
         pop.connect("notify::active", lambda r, _: self._set("save_popup", r.get_active()))
         fb.add(pop)
-        notif = Adw.SwitchRow(title="Notification du bureau", active=self.cfg.get("save_notification", True),
-                              subtitle="Avec les boutons « Éditer » et « Ouvrir le dossier »")
+        notif = Adw.SwitchRow(title="Desktop notification", active=self.cfg.get("save_notification", True),
+                              subtitle="With the \"Edit\" and \"Open folder\" buttons")
         notif.connect("notify::active", lambda r, _: self._set("save_notification", r.get_active()))
         fb.add(notif)
         page.add(fb)
-        setup = Gtk.Button(label="Installer", valign=Gtk.Align.CENTER, css_classes=["flat"],
-                           tooltip_text="Configurer automatiquement les raccourcis (KDE, GNOME…)")
+        setup = Gtk.Button(label="Install", valign=Gtk.Align.CENTER, css_classes=["flat"],
+                           tooltip_text="Set up the shortcuts automatically (KDE, GNOME…)")
         setup.connect("clicked", self._setup_shortcut)
-        fb = Adw.PreferencesGroup(title="Raccourcis", header_suffix=setup,
-                                  description="Raccourcis globaux, actifs même en jeu ; modifiables ensuite dans "
-                                              "les paramètres de ton bureau")
+        fb = Adw.PreferencesGroup(title="Shortcuts", header_suffix=setup,
+                                  description="Global shortcuts, active even in game; can be changed later in "
+                                              "your desktop settings")
         for key, title, sub in (
-                ("save", "Sauvegarder un clip", "Les dernières secondes du replay"),
-                ("rec_start", "Démarrer un enregistrement", "Filme jusqu'à l'arrêt, en plus du replay"),
-                ("rec_stop", "Arrêter l'enregistrement", "Le clip arrive dans la bibliothèque")):
+                ("save", "Save a clip", "The last seconds of the replay"),
+                ("rec_start", "Start a recording", "Records until stopped, on top of the replay"),
+                ("rec_stop", "Stop the recording", "The clip shows up in the library")):
             row = Adw.ActionRow(title=title, subtitle=sub)
             row.add_suffix(Gtk.ShortcutLabel(accelerator=SHORTCUTS[key], valign=Gtk.Align.CENTER))
             fb.add(row)
         page.add(fb)
-        # Encodeur des exports : le plus rapide mesuré sur cette machine, ou forcé
+        # Export encoder: the fastest measured on this machine, or forced
         exp = Adw.PreferencesGroup(title="Exports")
         self.enc_choices = ["auto", "gpu", "cpu"]
-        self.enc_row = Adw.ComboRow(title="Encodeur", model=Gtk.StringList.new(
-            ["Automatique (le plus rapide)", "Carte graphique", "Processeur"]))
+        self.enc_row = Adw.ComboRow(title="Encoder", model=Gtk.StringList.new(
+            ["Automatic (fastest)", "Graphics card", "Processor"]))
         cur = self.cfg.get("export_encoder", "auto")
         self.enc_row.set_selected(self.enc_choices.index(cur) if cur in self.enc_choices else 0)
         self.enc_row.connect("notify::selected", self._on_encoder)
@@ -365,14 +365,14 @@ class Preferences(Adw.PreferencesDialog):
         if not ENCODER_DETECTOR.ready:
             ENCODER_DETECTOR.detect(self._encoder_summary)
 
-        share = Adw.PreferencesGroup(title="Partage")
+        share = Adw.PreferencesGroup(title="Sharing")
         lim = Adw.SpinRow.new_with_range(1, 1000, 1)
-        lim.set_title("Limite d'envoi Discord (Mo)")
-        lim.set_subtitle("10 Mo sans Nitro")
+        lim.set_title("Discord upload limit (MB)")
+        lim.set_subtitle("10 MB without Nitro")
         lim.set_value(self.cfg["discord_limit_mb"])
         lim.connect("notify::value", lambda r, _: self._set("discord_limit_mb", int(r.get_value())))
         share.add(lim)
-        folder = Adw.ActionRow(title="Dossier des clips", subtitle=self.cfg["clips_dir"])
+        folder = Adw.ActionRow(title="Clips folder", subtitle=self.cfg["clips_dir"])
         btn = Gtk.Button(icon_name="folder-open-symbolic", valign=Gtk.Align.CENTER, css_classes=["flat"])
         btn.connect("clicked", lambda *_: open_uri(self.cfg["clips_dir"]))
         folder.add_suffix(btn)
@@ -397,7 +397,7 @@ class Preferences(Adw.PreferencesDialog):
         self._fill_extra_monitors()
 
     def _fill_extra_monitors(self):
-        """Une case par écran détecté, sauf l'écran principal (qui a le son)."""
+        """One checkbox per detected screen, except the main screen (which has the audio)."""
         for row in self.extra_checks:
             self.extra_row.remove(row)
         self.extra_checks = []
@@ -419,15 +419,15 @@ class Preferences(Adw.PreferencesDialog):
         chosen = [m for m in self.cfg.get("extra_monitors") or [] if m != name and m != self.cfg["monitor"]]
         if on:
             chosen.append(name)
-        order = {n: i for i, n in enumerate(self.monitors)}   # dans l'ordre des écrans détectés
+        order = {n: i for i, n in enumerate(self.monitors)}   # in the order of the detected screens
         self._set("extra_monitors", sorted(chosen, key=lambda n: order.get(n, 99)))
         self._extra_summary()
 
     def _extra_summary(self):
         chosen = self.cfg.get("extra_monitors") or []
         self.extra_row.set_subtitle(
-            ("Filmés en même temps, sans son : " + ", ".join(chosen)) if chosen
-            else "Aucun · dans l'éditeur, tu pourras basculer d'un écran à l'autre ou exporter celui que tu veux")
+            ("Recorded at the same time, without audio: " + ", ".join(chosen)) if chosen
+            else "None · in the editor, you'll be able to switch from one screen to another or export the one you want")
 
     def _on_monitor(self, row, _):
         self._set("monitor", self.monitors[row.get_selected()])
@@ -446,16 +446,16 @@ class Preferences(Adw.PreferencesDialog):
         self._encoder_summary()
 
     def _encoder_summary(self):
-        """Sous-titre : encodeur utilisé par codec, et temps mesurés (carte graphique / processeur)."""
+        """Subtitle: encoder used per codec, and measured times (graphics card / processor)."""
         if not ENCODER_DETECTOR.ready:
-            self.enc_row.set_subtitle("Mesure de la vitesse en cours…")
+            self.enc_row.set_subtitle("Measuring speed…")
             return
         parts = []
         for c in ("h264", "hevc", "av1"):
             label = BACKEND_LABELS[ENCODER_DETECTOR.get(c)[0]]
             t = ENCODER_DETECTOR.timings.get(c, {})
-            bench = f" ({t['gpu']:.1f} s carte / {t['cpu']:.1f} s processeur)" if "gpu" in t and "cpu" in t else ""
-            parts.append(f"{c.upper()} : {label}{bench}")
+            bench = f" ({t['gpu']:.1f} s GPU / {t['cpu']:.1f} s CPU)" if "gpu" in t and "cpu" in t else ""
+            parts.append(f"{c.upper()}: {label}{bench}")
         self.enc_row.set_subtitle("\n".join(parts))
 
     def _set(self, key, value):
@@ -465,7 +465,7 @@ class Preferences(Adw.PreferencesDialog):
     def _setup_shortcut(self, *_):
         def done(ok, out, err):
             msg = (out.decode().strip() or err.strip()) if isinstance(out, bytes) else str(out)
-            dialog = Adw.AlertDialog(heading="Raccourcis" if ok else "Raccourcis : action manuelle", body=msg)
+            dialog = Adw.AlertDialog(heading="Shortcuts" if ok else "Shortcuts: manual action", body=msg)
             dialog.add_response("ok", "OK")
             dialog.present(self)
 
@@ -478,7 +478,7 @@ class Preferences(Adw.PreferencesDialog):
             def done(ok, _o, _e):
                 self.win.refresh_recorder_state()
                 if ok:
-                    self.win.toast("Replay redémarré avec les nouveaux réglages")
+                    self.win.toast("Replay restarted with the new settings")
             run_async(["systemctl", "--user", "try-restart", SERVICE], done)
         else:
             self.win.refresh_recorder_state()

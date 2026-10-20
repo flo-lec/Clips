@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Clips — replay, bibliothèque, éditeur et partage de clips de jeu (façon SteelSeries Moments).
+"""Clips — replay, library, editor and sharing of game clips (à la SteelSeries Moments).
 
-Modules : clips_common (config) · media (ffmpeg/GStreamer) · widgets (dessin GPU) · editor · prefs.
+Modules: clips_common (config) · media (ffmpeg/GStreamer) · widgets (GPU drawing) · editor · prefs.
 """
 import os
 import sys
@@ -9,8 +9,8 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# Rendu GTK en OpenGL : avec une vidéo à 60 i/s, le moteur Vulkan coûte ~6× plus de processeur
-# (mesuré : ~50 % d'un cœur contre ~8 %). Reste surchargeable via la variable d'environnement.
+# GTK rendering with OpenGL: with a 60 fps video, the Vulkan renderer costs ~6× more CPU
+# (measured: ~50 % of a core vs ~8 %). Can still be overridden through the environment variable.
 os.environ.setdefault("GSK_RENDERER", "gl")
 
 import gi  # noqa: E402
@@ -85,8 +85,8 @@ CSS = """
 .hero-text { color: white; text-shadow: 0 1px 6px alpha(black, 0.6); }
 .hero-stats { font-weight: 600; }
 .sidebar-count { font-size: 0.85em; }
-/* Étoile des favoris : contour blanc (intérieur vide) au survol, dorée et pleine une fois cochée.
-   Aucun fond ni effet d'état GTK (pas de flash blanc au clic). */
+/* Favorites star: white outline (empty inside) on hover, golden and filled once checked.
+   No GTK background or state effect (no white flash on click). */
 .fav-btn, .fav-btn:hover, .fav-btn:active, .fav-btn:checked, .fav-btn:checked:hover {
     min-width: 30px; min-height: 30px; padding: 0; border-radius: 999px; background: alpha(black, 0.55);
     box-shadow: none; border: none; opacity: 0; transition: opacity 150ms, background 150ms; }
@@ -103,7 +103,7 @@ CSS = """
     background: alpha(black, 0.55); color: white; opacity: 0; transition: opacity 150ms, background 150ms; }
 .clip-card:hover .card-btn { opacity: 0.95; }
 .card-btn:hover { background: alpha(black, 0.75); }
-/* Case à cocher de sélection : visible au survol, toujours visible en mode sélection ou une fois cochée. */
+/* Selection checkbox: visible on hover, always visible in selection mode or once checked. */
 .sel-btn { padding: 4px; border-radius: 8px; background: alpha(black, 0.45); opacity: 0;
            transition: opacity 150ms; }
 .sel-btn check { margin: 0; }
@@ -150,8 +150,8 @@ flowboxchild, flowboxchild:hover, flowboxchild:active, flowboxchild:selected { b
 
 
 class Thumb(Gtk.Picture):
-    """Miniature 16:9 de taille naturelle fixe (272 px) : la grille place autant de cartes que possible
-    par ligne, puis elles s'agrandissent ensemble pour remplir la largeur."""
+    """16:9 thumbnail with a fixed natural size (272 px): the grid fits as many cards as possible
+    per row, then they grow together to fill the width."""
     NAT_W = 272
 
     def do_measure(self, orientation, for_size):
@@ -182,7 +182,7 @@ class ClipItem(GObject.Object):
         self.load_info()
 
     def refresh(self):
-        """Le fichier a changé (fin d'un enregistrement manuel) : tout est relu (durée, miniature…)."""
+        """The file changed (end of a manual recording): everything is re-read (duration, thumbnail…)."""
         st = os.stat(self.path)
         self.mtime, self.size = st.st_mtime, st.st_size
         self.meta = self.texture = None
@@ -206,13 +206,13 @@ class ClipItem(GObject.Object):
 
 
 class Library(GObject.Object):
-    """Liste des clips, surveillance du dossier, métadonnées et miniatures paresseuses."""
+    """Clip list, folder monitoring, lazy metadata and thumbnails."""
     __gsignals__ = {"stats-changed": (GObject.SignalFlags.RUN_FIRST, None, ())}
 
     def __init__(self, folder):
         super().__init__()
         self.folder = folder
-        self.recording_path = None   # enregistrement manuel en cours : fichier incomplet, ni sondé ni lu
+        self.recording_path = None   # manual recording in progress: incomplete file, neither probed nor played
         self.store = Gio.ListStore(item_type=ClipItem)
         os.makedirs(folder, exist_ok=True)
         os.makedirs(THUMB_DIR, exist_ok=True)
@@ -258,7 +258,7 @@ class Library(GObject.Object):
         GLib.timeout_add(4000, lambda: (self.reread(item), False)[1])
 
     def reread(self, item):
-        """Fichier annexe complété après coup (jeu, 2e écran rattaché par on_save.py)."""
+        """Sidecar file completed afterwards (game, 2nd screen attached by on_save.py)."""
         if self.index(item.path) >= 0 and os.path.exists(item.path):
             before = (item.game, item.n_screens)
             item.load_info()
@@ -283,7 +283,7 @@ class Library(GObject.Object):
                 self._add(other.get_path())
 
     def ensure(self, item):
-        """Charge métadonnées puis miniature (avec cache disque) si pas encore fait."""
+        """Loads metadata then thumbnail (with disk cache) if not done yet."""
         if item.loading or (item.meta and item.texture) or item.path == self.recording_path:
             return
         item.loading = True
@@ -335,7 +335,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.preview = None
         self.scrub_grab = None
         self.library = Library(self.cfg["clips_dir"])
-        if manual_recording_started() is not None:   # avant la 1re carte : le fichier en cours n'est pas sondé
+        if manual_recording_started() is not None:   # before the 1st card: the file in progress is not probed
             self.library.recording_path = manual_recording_path()
         SHARE.prune()
 
@@ -372,7 +372,7 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _is_recording(self, path):
         if path and path == self.library.recording_path:
-            self.toast(f"Enregistrement en cours — {shortcut_label('rec_stop')} pour l'arrêter")
+            self.toast(f"Recording in progress — {shortcut_label('rec_stop')} to stop it")
             return True
         return False
 
@@ -382,15 +382,15 @@ class MainWindow(Adw.ApplicationWindow):
         return item.path, share_gains(item.path, item.meta["audio_tracks"], self.cfg)
 
     def _prepare_share(self, item):
-        # Au survol, seulement les clips courts (≈ 1 s de calcul) ; un long clip est préparé à l'ouverture de
-        # l'éditeur, en tâche de fond.
+        # On hover, only short clips (≈ 1 s of work); a long clip is prepared when the editor opens,
+        # in the background.
         args = self._share_args(item)
         if args and item.path != self.library.recording_path and item.meta["duration"] <= SHARE.SYNC_MAX_S:
             SHARE.prepare(*args)
 
     def _share_path(self, item):
-        """Fichier à envoyer : copie au son mixé si le clip a plusieurs pistes (sinon seule la 1re serait
-        entendue). None = clip long encore en préparation."""
+        """File to send: copy with mixed audio if the clip has several tracks (otherwise only the 1st would be
+        heard). None = long clip still being prepared."""
         args = self._share_args(item)
         return SHARE.get_sync(*args, item.meta["duration"]) if args else item.path
 
@@ -399,7 +399,7 @@ class MainWindow(Adw.ApplicationWindow):
             return None
         path = self._share_path(item)
         if path is None:
-            self.toast("Préparation du son pour le partage… réessaie dans un instant")
+            self.toast("Preparing the audio for sharing… try again in a moment")
             return None
         return file_content_provider(path)
 
@@ -408,7 +408,7 @@ class MainWindow(Adw.ApplicationWindow):
         content = self._share_content(self.library.store.get_item(idx)) if idx >= 0 else file_content_provider(path)
         if content:
             self.get_clipboard().set_content(content)
-            self.toast("Fichier copié — colle-le avec Ctrl+V")
+            self.toast("File copied — paste it with Ctrl+V")
 
     def _with_item(self, path, fn):
         i = self.library.index(path)
@@ -416,7 +416,7 @@ class MainWindow(Adw.ApplicationWindow):
             fn(self.library.store.get_item(i))
 
     def trash_clip(self, path, quiet=False):
-        """Corbeille du système : le clip, son fichier annexe et ses autres écrans (tout se récupère ensemble)."""
+        """System trash: the clip, its sidecar file and its other screens (all recovered together)."""
         try:
             if self.preview and self.preview[0].item.path == path:
                 self._stop_preview()
@@ -424,29 +424,29 @@ class MainWindow(Adw.ApplicationWindow):
             for f in files:
                 Gio.File.new_for_path(f).trash(None)
         except GLib.Error as e:
-            self.toast(f"Impossible : {e.message}")
+            self.toast(f"Couldn't do it: {e.message}")
             return
         finally:
             self._mark_kde_trash_full()
         if not quiet:
-            toast = Adw.Toast(title=f"« {os.path.splitext(os.path.basename(path))[0]} » mis à la corbeille",
-                              button_label="Annuler", timeout=6)
+            toast = Adw.Toast(title=f"\"{os.path.splitext(os.path.basename(path))[0]}\" moved to the trash",
+                              button_label="Undo", timeout=6)
             toast.connect("button-clicked", lambda *_: self._untrash(files))
             self.toasts.add_toast(toast)
 
     @staticmethod
     def _mark_kde_trash_full():
-        """KDE (Dolphin, Plasma) lit « corbeille vide » dans trashrc, que seul KIO met à jour : sans ça, Gio laisse
-        « Vider la corbeille » grisé alors qu'elle est pleine."""
+        """KDE (Dolphin, Plasma) reads "trash empty" from trashrc, which only KIO updates: without this, Gio leaves
+        "Empty Trash" greyed out even though it's full."""
         try:
             Gio.Subprocess.new(["kwriteconfig6", "--file", "trashrc", "--group", "Status", "--key", "Empty", "false"],
                                Gio.SubprocessFlags.STDOUT_SILENCE | Gio.SubprocessFlags.STDERR_SILENCE)
         except GLib.Error:
-            pass  # pas sous KDE
+            pass  # not on KDE
 
     @staticmethod
     def _trash_entry(path):
-        """Fichier de la corbeille (freedesktop) qui correspond à path : le plus récemment jeté."""
+        """Trash file (freedesktop) matching path: the most recently trashed one."""
         from urllib.parse import unquote
         trash = os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")), "Trash")
         best = None
@@ -469,7 +469,7 @@ class MainWindow(Adw.ApplicationWindow):
         return best
 
     def _untrash(self, files):
-        """Annuler : remet chaque fichier à sa place depuis la corbeille."""
+        """Undo: puts each file back in place from the trash."""
         missing = 0
         for path in files:
             entry = self._trash_entry(path)
@@ -482,9 +482,9 @@ class MainWindow(Adw.ApplicationWindow):
                 os.remove(entry[1])
             except OSError:
                 missing += 1
-        self.toast("Clip restauré" if not missing else "Restauration incomplète : regarde dans la corbeille")
+        self.toast("Clip restored" if not missing else "Incomplete restore: have a look in the trash")
 
-    # ---- bibliothèque
+    # ---- library
     def _library_page(self):
         toolbar = Adw.ToolbarView()
         header = Adw.HeaderBar()
@@ -494,22 +494,22 @@ class MainWindow(Adw.ApplicationWindow):
         pill = Gtk.Box(spacing=8, css_classes=["replay-pill"], valign=Gtk.Align.CENTER)
         self.rec_dot = Gtk.Box(css_classes=["rec-dot"], valign=Gtk.Align.CENTER)
         self.rec_label = Gtk.Label(label="Replay", css_classes=["caption-heading"], width_chars=13, xalign=0)
-        self.rec_switch = Gtk.Switch(valign=Gtk.Align.CENTER, tooltip_text="Enregistrement en continu (replay)")
+        self.rec_switch = Gtk.Switch(valign=Gtk.Align.CENTER, tooltip_text="Continuous recording (replay)")
         self.rec_handler = self.rec_switch.connect("notify::active", self._toggle_recorder)
         for w in (self.rec_dot, self.rec_label, self.rec_switch):
             pill.append(w)
-        # Enregistrement manuel en cours (Alt+F9 → Alt+F11) : pastille rouge avec la durée et un bouton d'arrêt.
+        # Manual recording in progress (Alt+F9 → Alt+F11): red pill with the duration and a stop button.
         self.manual_pill = Gtk.Box(spacing=6, css_classes=["manual-rec-pill"], valign=Gtk.Align.CENTER,
                                    visible=False)
         self.manual_pill.append(Gtk.Box(css_classes=["rec-dot", "on"], valign=Gtk.Align.CENTER))
         self.manual_label = Gtk.Label(css_classes=["caption-heading", "numeric"], width_chars=9, xalign=0)
         self.manual_pill.append(self.manual_label)
         stop = Gtk.Button(icon_name="media-playback-stop-symbolic", css_classes=["flat", "circular", "compact"],
-                          valign=Gtk.Align.CENTER, tooltip_text=f"Arrêter l'enregistrement ({shortcut_label('rec_stop')})")
+                          valign=Gtk.Align.CENTER, tooltip_text=f"Stop the recording ({shortcut_label('rec_stop')})")
         stop.connect("clicked", lambda *_: run_async([os.path.join(APP_DIR, "record-clip"), "stop"],
                                                      lambda *_a: self._poll_manual_recording()))
         self.manual_pill.append(stop)
-        self.side_btn = Gtk.ToggleButton(icon_name="sidebar-show-symbolic", tooltip_text="Afficher / masquer le panneau (F9)",
+        self.side_btn = Gtk.ToggleButton(icon_name="sidebar-show-symbolic", tooltip_text="Show / hide the panel (F9)",
                                          active=self.cfg.get("sidebar_open", True))
         self.side_btn.connect("toggled", self._on_side_toggled)
         header.pack_start(self.side_btn)
@@ -517,16 +517,16 @@ class MainWindow(Adw.ApplicationWindow):
         header.pack_start(self.manual_pill)
         GLib.timeout_add(500, self._poll_manual_recording)
         menu = Gio.Menu()
-        menu.append("Préférences", "win.prefs")
-        menu.append("Ouvrir le dossier des clips", "win.folder")
+        menu.append("Preferences", "win.prefs")
+        menu.append("Open the clips folder", "win.folder")
         header.pack_end(Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu, primary=True,
                                        tooltip_text="Menu"))
-        sources = Gtk.Button(icon_name="audio-speakers-symbolic", tooltip_text="Sources audio et réglages (Ctrl+,)")
+        sources = Gtk.Button(icon_name="audio-speakers-symbolic", tooltip_text="Audio sources and settings (Ctrl+,)")
         sources.connect("clicked", lambda *_: Preferences(self).present(self))
         header.pack_end(sources)
         toolbar.add_top_bar(header)
 
-        # Barre latérale : Tous les clips · un jeu par ligne (icône Steam + nombre) · Sans jeu
+        # Sidebar: All clips · one game per row (Steam icon + count) · No game
         self.game_filter = "all"
         self.side_key = None
         self.side_updating = False
@@ -537,19 +537,19 @@ class MainWindow(Adw.ApplicationWindow):
         side_box = Gtk.Box()
         side_box.append(side_scroll)
         side_box.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
-        # Panneau toujours là (même sans clip) ; repliable via le bouton de la barre de titre.
+        # Panel always there (even with no clip); collapsible via the title bar button.
         self.side_panel = Gtk.Revealer(child=side_box, transition_type=Gtk.RevealerTransitionType.SLIDE_RIGHT,
                                        transition_duration=180, reveal_child=self.side_btn.get_active())
 
-        # Barre de filtres : recherche · période · jour précis · tri
-        # Passe à la ligne quand la fenêtre est étroite (rien n'est tronqué ni ne déborde).
+        # Filter bar: search · period · specific day · sort
+        # Wraps when the window is narrow (nothing gets truncated or overflows).
         bar = Adw.WrapBox(child_spacing=10, line_spacing=8, css_classes=["filter-bar"])
         self.filter_bar = bar
-        self.search = Gtk.SearchEntry(placeholder_text="Rechercher un clip", width_chars=22)
+        self.search = Gtk.SearchEntry(placeholder_text="Search for a clip", width_chars=22)
         self.search.connect("search-changed", lambda *_: self._schedule_rebuild())
         bar.append(self.search)
         self.period = Adw.ToggleGroup(css_classes=["round"])
-        for name, label in (("all", "Tout"), ("today", "Aujourd'hui"), ("7", "7 jours"), ("30", "30 jours")):
+        for name, label in (("all", "All"), ("today", "Today"), ("7", "7 days"), ("30", "30 days")):
             self.period.add(Adw.Toggle(name=name, label=label))
         self.period.set_active_name("all")
         self.period.connect("notify::active-name", self._on_period)
@@ -558,22 +558,22 @@ class MainWindow(Adw.ApplicationWindow):
         cal = Gtk.Calendar()
         cal.connect("day-selected", self._on_day)
         pop = Gtk.Popover(child=cal)
-        self.day_btn = Gtk.MenuButton(popover=pop, tooltip_text="Choisir un jour précis")
+        self.day_btn = Gtk.MenuButton(popover=pop, tooltip_text="Pick a specific day")
         self.day_btn.set_child(Adw.ButtonContent(icon_name="x-office-calendar-symbolic", label="Date"))
         self.day_clear = Gtk.Button(icon_name="window-close-symbolic", css_classes=["flat", "circular"],
-                                    tooltip_text="Retirer le filtre de date", visible=False)
+                                    tooltip_text="Remove the date filter", visible=False)
         self.day_clear.connect("clicked", lambda *_: self._set_day(None))
         date = Gtk.Box(spacing=2)
         date.append(self.day_btn)
         date.append(self.day_clear)
         bar.append(date)
-        self.sort = Gtk.DropDown(model=Gtk.StringList.new(["Plus récents", "Plus anciens", "Plus longs", "Plus lourds"]),
-                                 tooltip_text="Trier")
+        self.sort = Gtk.DropDown(model=Gtk.StringList.new(["Newest", "Oldest", "Longest", "Largest"]),
+                                 tooltip_text="Sort")
         self.sort.connect("notify::selected", lambda *_: self._schedule_rebuild())
         bar.append(self.sort)
         self.count_label = Gtk.Label(css_classes=["dim-label"], valign=Gtk.Align.CENTER)
         bar.append(self.count_label)
-        size = Gtk.Box(spacing=4, valign=Gtk.Align.CENTER, tooltip_text="Taille des aperçus")
+        size = Gtk.Box(spacing=4, valign=Gtk.Align.CENTER, tooltip_text="Thumbnail size")
         size.append(Gtk.Image(icon_name="clips-thumb-size-symbolic", pixel_size=14, css_classes=["dim-label"]))
         self.thumb_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 180, 560, 10)
         self.thumb_scale.set_value(Thumb.NAT_W)
@@ -582,15 +582,15 @@ class MainWindow(Adw.ApplicationWindow):
         size.append(self.thumb_scale)
         bar.append(size)
 
-        # Colonne principale (défile d'un bloc) : en-tête du jeu · filtres · clips par jour
+        # Main column (scrolls as one block): game header · filters · clips by day
         self.sections = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4,
                                 margin_start=18, margin_end=18, margin_top=14, margin_bottom=18)
         scroller = Gtk.ScrolledWindow(child=self.sections, vexpand=True, hexpand=True,
                                       hscrollbar_policy=Gtk.PolicyType.NEVER)
-        empty = Adw.StatusPage(icon_name="camera-video-symbolic", title="Aucun clip pour l'instant",
-                               description=f"Active le replay, lance un jeu et appuie sur <b>{SHORTCUT_LABEL}</b> "
-                                           "pour garder les dernières secondes — ou filme ce que tu veux avec "
-                                           f"<b>{shortcut_label('rec_start')}</b> puis "
+        empty = Adw.StatusPage(icon_name="camera-video-symbolic", title="No clips yet",
+                               description=f"Turn on the replay, launch a game and press <b>{SHORTCUT_LABEL}</b> "
+                                           "to keep the last seconds — or record whatever you want with "
+                                           f"<b>{shortcut_label('rec_start')}</b> then "
                                            f"<b>{shortcut_label('rec_stop')}</b>.", hexpand=True)
         self.lib_stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE, hexpand=True)
         self.lib_stack.add_named(scroller, "grid")
@@ -647,7 +647,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.side_key = None
         self._schedule_rebuild()
 
-    # barre latérale des jeux
+    # games sidebar
     def _side_row(self, key, name, count, appid=None, icon=None):
         row = Gtk.ListBoxRow()
         row.key = key
@@ -687,15 +687,15 @@ class MainWindow(Adw.ApplicationWindow):
             self.side_updating = True
             while (c := self.sidebar.get_first_child()):
                 self.sidebar.remove(c)
-            self.sidebar.append(self._side_row("all", "Tous les clips", len(items), icon="view-grid-symbolic"))
-            self.sidebar.append(self._side_row("fav", "Favoris", favs, icon="clips-star-symbolic"))
+            self.sidebar.append(self._side_row("all", "All clips", len(items), icon="view-grid-symbolic"))
+            self.sidebar.append(self._side_row("fav", "Favorites", favs, icon="clips-star-symbolic"))
             if any(g for g in games) and self.cfg.get("detect_game", True):
-                self.sidebar.append(self._side_title("JEUX"))
+                self.sidebar.append(self._side_title("GAMES"))
             for g in sorted((g for g in games if g and self.cfg.get("detect_game", True)),
                             key=lambda x: (-games[x][0], x.lower())):
                 self.sidebar.append(self._side_row(f"g:{g}", g, games[g][0], appid=games[g][1]))
             if games.get(None) and self.cfg.get("detect_game", True):
-                self.sidebar.append(self._side_row("none", "Sans jeu", games[None][0], icon="camera-video-symbolic"))
+                self.sidebar.append(self._side_row("none", "No game", games[None][0], icon="camera-video-symbolic"))
             self.side_updating = False
         self.side_updating = True
         row = self.sidebar.get_first_child()
@@ -719,24 +719,24 @@ class MainWindow(Adw.ApplicationWindow):
             self.game_filter = row.key
             self._schedule_rebuild()
 
-    # en-tête de la colonne : bannière du jeu (images Steam) ou titre simple
+    # column header: game banner (Steam images) or plain title
     def _header(self, items):
         n = len(items)
         size = sum(it.size for it in items)
         total = sum(it.meta["duration"] for it in items if it.meta)
         stats = [f"{n} clip{'s' if n > 1 else ''}", fmt_size(size)]
         if total:
-            stats.append(f"{int(total // 60)} min {int(total % 60):02d} s au total" if total >= 60 else f"{int(total)} s au total")
+            stats.append(f"{int(total // 60)} min {int(total % 60):02d} s in total" if total >= 60 else f"{int(total)} s in total")
         if items:
             last = max(items, key=lambda it: it.mtime)
-            stats.append(f"dernier : {self._day_label(last.mtime).lower()} à {time.strftime('%H:%M', time.localtime(last.mtime))}")
+            stats.append(f"latest: {self._day_label(last.mtime).lower()} at {time.strftime('%H:%M', time.localtime(last.mtime))}")
         stats = " · ".join(stats)
         key = self.game_filter
         if key == "fav":
             hero = Gtk.Box(spacing=20, css_classes=["fav-hero"], margin_bottom=6)
             hero.append(Gtk.Image(icon_name="clips-fav-on", pixel_size=64, margin_start=28, valign=Gtk.Align.CENTER))
             text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, valign=Gtk.Align.CENTER)
-            text.append(Gtk.Label(label="Favoris", xalign=0, css_classes=["title-1", "hero-text"]))
+            text.append(Gtk.Label(label="Favorites", xalign=0, css_classes=["title-1", "hero-text"]))
             text.append(Gtk.Label(label=stats, xalign=0, css_classes=["hero-text", "hero-stats"]))
             hero.append(text)
             return hero
@@ -766,7 +766,7 @@ class MainWindow(Adw.ApplicationWindow):
                 return hero
             title = name
         else:
-            title = {"none": "Sans jeu", "fav": "Favoris"}.get(key, "Tous les clips")
+            title = {"none": "No game", "fav": "Favorites"}.get(key, "All clips")
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, margin_start=6, margin_bottom=4)
         line = Gtk.Box(spacing=12)
         if key.startswith("g:"):
@@ -836,9 +836,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.sections.append(self._header(in_game))
         self.sections.append(self.filter_bar)
         if not shown:
-            self.sections.append(Adw.StatusPage(icon_name="edit-find-symbolic", title="Aucun clip ne correspond",
-                                                description="Change de période ou de recherche.", vexpand=True))
-        by_game = self.game_filter == "fav"     # Favoris : une section par jeu
+            self.sections.append(Adw.StatusPage(icon_name="edit-find-symbolic", title="No matching clips",
+                                                description="Try another period or search.", vexpand=True))
+        by_game = self.game_filter == "fav"     # Favorites: one section per game
         by_date = self.sort.get_selected() in (0, 1) and not by_game
         groups = []
         for it in shown:
@@ -855,7 +855,7 @@ class MainWindow(Adw.ApplicationWindow):
                 groups.append((day, []))
             groups[-1][1].append(it)
         if by_game:
-            groups.sort(key=lambda g: g[0] == "")   # « Sans jeu » en dernier
+            groups.sort(key=lambda g: g[0] == "")   # "No game" last
         for day, group in groups:
             if by_game:
                 head = Gtk.Box(spacing=10, margin_top=14, margin_bottom=4, margin_start=6, css_classes=["section-game"])
@@ -864,7 +864,7 @@ class MainWindow(Adw.ApplicationWindow):
                 if tex:
                     head.append(Gtk.Picture(paintable=tex, width_request=24, height_request=24, can_shrink=True,
                                             valign=Gtk.Align.CENTER))
-                head.append(Gtk.Label(label=day or "Sans jeu", css_classes=["title-4"], xalign=0))
+                head.append(Gtk.Label(label=day or "No game", css_classes=["title-4"], xalign=0))
                 head.append(Gtk.Label(label=f"{len(group)} clip{'s' if len(group) > 1 else ''}",
                                       css_classes=["dim-label", "section-count"], valign=Gtk.Align.BASELINE))
                 self.sections.append(head)
@@ -889,13 +889,13 @@ class MainWindow(Adw.ApplicationWindow):
     def _day_label(ts):
         lt = time.localtime(ts)
         days = (time.mktime(time.localtime()[:3] + (0, 0, 0, 0, 0, -1)) - time.mktime(lt[:3] + (0, 0, 0, 0, 0, -1))) // 86400
-        months = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre",
-                  "octobre", "novembre", "décembre"]
-        weekdays = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
+        months = ["January", "February", "March", "April", "May", "June", "July", "August", "September",
+                  "October", "November", "December"]
+        weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
         if days == 0:
-            return "Aujourd'hui"
+            return "Today"
         if days == 1:
-            return "Hier"
+            return "Yesterday"
         date = f"{lt.tm_mday} {months[lt.tm_mon - 1]}"
         if days < 7:
             return f"{weekdays[lt.tm_wday]} {date}"
@@ -913,32 +913,32 @@ class MainWindow(Adw.ApplicationWindow):
         chip_label = Gtk.Label(ellipsize=3, max_width_chars=22)
         chip.append(chip_icon)
         chip.append(chip_label)
-        # bouton lecture : aperçu directement dans la carte
+        # play button: preview right in the card
         play = Gtk.Button(css_classes=["card-play"], halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER,
-                          focus_on_click=False, tooltip_text="Aperçu ici")
+                          focus_on_click=False, tooltip_text="Preview here")
         white = Gdk.RGBA()
         white.parse("white")
         glyph = PlayGlyph(17, color=white)
         play.set_child(glyph)
         play.connect("clicked", lambda *_: self._toggle_preview(box))
-        # sélection (coin haut gauche) · plein écran + favori (coin haut droit)
+        # selection (top left corner) · fullscreen + favorite (top right corner)
         sel = Gtk.CheckButton(css_classes=["sel-btn"],
                                halign=Gtk.Align.START, valign=Gtk.Align.START, margin_top=6, margin_start=6,
-                               focus_on_click=False, tooltip_text="Sélectionner")
+                               focus_on_click=False, tooltip_text="Select")
         sel.connect("toggled", lambda b: self._select(box.item, b.get_active()))
         full = Gtk.Button(icon_name="view-fullscreen-symbolic", css_classes=["card-btn"], halign=Gtk.Align.END,
                           valign=Gtk.Align.START, margin_top=6, margin_end=42, focus_on_click=False,
-                          tooltip_text="Lire en plein écran")
+                          tooltip_text="Play fullscreen")
         full.connect("clicked", lambda *_: self.open_clip(box.item.path, fullscreen=True))
         trash = Gtk.Button(icon_name="user-trash-symbolic", css_classes=["card-btn"], halign=Gtk.Align.END,
                            valign=Gtk.Align.START, margin_top=6, margin_end=78, focus_on_click=False,
-                           tooltip_text="Mettre à la corbeille (Annuler possible quelques secondes)")
+                           tooltip_text="Move to the trash (can be undone for a few seconds)")
         trash.connect("clicked", lambda *_: self.trash_clip(box.item.path))
         star = Gtk.ToggleButton(css_classes=["fav-btn", "circular"], halign=Gtk.Align.END, valign=Gtk.Align.START,
                                 margin_top=6, margin_end=6, focus_on_click=False)
         star.set_child(Gtk.Image(icon_name="clips-fav-off", pixel_size=22))
         star.connect("toggled", lambda b: self._set_favorite(box.item, b.get_active()))
-        # barre de lecture de l'aperçu, en bas de la miniature
+        # preview playback bar, at the bottom of the thumbnail
         scrub = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 1, 0.01)
         scrub.set_draw_value(False)
         scrub.set_valign(Gtk.Align.END)
@@ -946,8 +946,8 @@ class MainWindow(Adw.ApplicationWindow):
         scrub.set_visible(False)
         scrub.set_focus_on_click(False)
         scrub.connect("change-value", lambda _s, _t, v: self._preview_seek(box, v))
-        # On se branche sur le geste de glisser interne du curseur : il démarre à l'appui (bouton ou piste)
-        # et finit au relâchement, même si le curseur a « capté » le clic.
+        # Hook into the slider's internal drag gesture: it starts on press (knob or trough)
+        # and ends on release, even if the slider "captured" the click.
         ctrls = scrub.observe_controllers()
         for i in range(ctrls.get_n_items()):
             c = ctrls.get_item(i)
@@ -955,14 +955,14 @@ class MainWindow(Adw.ApplicationWindow):
                 c.connect("drag-begin", lambda *_: self._preview_grab(box, True))
                 c.connect("drag-end", lambda *_: self._preview_grab(box, False))
         overlay.set_child(pic)
-        # enregistrement manuel en cours : voile + « En cours » (le fichier n'est pas encore lisible)
+        # manual recording in progress: veil + "Recording" (the file isn't playable yet)
         rec = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, css_classes=["rec-veil"], visible=False,
                       valign=Gtk.Align.FILL, halign=Gtk.Align.FILL)
         rec_title = Gtk.Box(spacing=8, halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER, vexpand=True)
         rec_title.append(Gtk.Box(css_classes=["rec-dot", "on"], valign=Gtk.Align.CENTER))
-        rec_title.append(Gtk.Label(label="En cours", css_classes=["title-3"]))
+        rec_title.append(Gtk.Label(label="Recording", css_classes=["title-3"]))
         rec.append(rec_title)
-        rec.append(Gtk.Label(label=f"{shortcut_label('rec_stop')} pour arrêter", css_classes=["caption"],
+        rec.append(Gtk.Label(label=f"{shortcut_label('rec_stop')} to stop", css_classes=["caption"],
                              margin_bottom=14))
         for w in (badge, chip, play, sel, trash, full, star, scrub, rec):
             overlay.add_overlay(w)
@@ -976,7 +976,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         drag = Gtk.DragSource(actions=Gdk.DragAction.COPY)
         drag.connect("prepare", lambda *_: self._share_content(box.item))
-        hover = Gtk.EventControllerMotion()   # on prépare la version à partager dès le survol
+        hover = Gtk.EventControllerMotion()   # prepare the shareable version as soon as it's hovered
         hover.connect("enter", lambda *_: self._prepare_share(box.item))
         box.add_controller(hover)
         drag.connect("drag-begin", lambda src, _d: box.item.texture and src.set_icon(box.item.texture, 64, 36))
@@ -987,7 +987,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         def changed(it):
             self._card_fill(box, it)
-            if self.sort.get_selected() == 2:   # tri par durée : la durée vient d'arriver
+            if self.sort.get_selected() == 2:   # sort by duration: the duration just arrived
                 self._schedule_rebuild()
 
         self.card_handlers.append((item, item.connect("changed", changed)))
@@ -999,12 +999,12 @@ class MainWindow(Adw.ApplicationWindow):
     def _on_card_activated(self, box):
         if self._is_recording(box.item.path):
             return
-        if self.selected:   # en mode sélection, un clic coche / décoche la carte
+        if self.selected:   # in selection mode, a click checks / unchecks the card
             box.sel.set_active(not box.sel.get_active())
         else:
             self.open_clip(box.item.path)
 
-    # ---- aperçu dans la carte
+    # ---- preview inside the card
     def _toggle_preview(self, box):
         if self.preview and self.preview[0] is box:
             player = self.preview[1]
@@ -1027,7 +1027,7 @@ class MainWindow(Adw.ApplicationWindow):
                 p.play()
 
         player = Player(box.item.path, meta["audio_tracks"], meta.get("vcodec", ""), on_eos=restart)
-        player.set_monitor(float(load_config().get("preview_volume", 1.0)))   # volume d'écoute de l'éditeur
+        player.set_monitor(float(load_config().get("preview_volume", 1.0)))   # the editor's monitor volume
         holder["p"] = player
         box.widgets[0].set_paintable(player.paintable)
         box.scrub.set_range(0, max(meta["duration"], 0.01))
@@ -1042,7 +1042,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _preview_tick(self):
         if not self.preview:
             return False
-        if self.scrub_grab:   # tête de lecture tenue : c'est la souris qui la place
+        if self.scrub_grab:   # playhead held: the mouse places it
             return True
         box, player, _t = self.preview
         pos = player.position()
@@ -1061,7 +1061,7 @@ class MainWindow(Adw.ApplicationWindow):
         return False
 
     def _preview_grab(self, box, pressed):
-        """Saisie de la tête de lecture : pause pendant le glisser, reprise (si ça jouait) au relâchement."""
+        """Grabbing the playhead: pause while dragging, resume (if it was playing) on release."""
         if not (self.preview and self.preview[0] is box):
             return
         player = self.preview[1]
@@ -1089,7 +1089,7 @@ class MainWindow(Adw.ApplicationWindow):
         box.glyph.set_playing(False)
         self._card_fill(box, box.item)
 
-    # ---- taille des aperçus
+    # ---- thumbnail size
     def _on_thumb_size(self, scale):
         Thumb.NAT_W = int(scale.get_value())
         for box in self.cards:
@@ -1106,27 +1106,27 @@ class MainWindow(Adw.ApplicationWindow):
 
         self._thumb_save = GLib.timeout_add(400, store)
 
-    # ---- sélection multiple
+    # ---- multiple selection
     def _selection_bar(self):
         bar = Gtk.ActionBar(css_classes=["selection-bar"])
         self.sel_label = Gtk.Label(css_classes=["heading"])
         cancel = Gtk.Button(icon_name="window-close-symbolic", css_classes=["flat", "circular"],
-                            tooltip_text="Annuler la sélection (Échap)")
+                            tooltip_text="Cancel the selection (Esc)")
         cancel.connect("clicked", lambda *_: self._clear_selection())
         bar.pack_start(cancel)
         bar.pack_start(self.sel_label)
-        all_btn = Gtk.Button(label="Tout sélectionner", css_classes=["flat"])
+        all_btn = Gtk.Button(label="Select all", css_classes=["flat"])
         all_btn.connect("clicked", lambda *_: self._select_all())
         bar.pack_start(all_btn)
         trash = Gtk.Button(css_classes=["destructive-action"])
-        trash.set_child(Adw.ButtonContent(icon_name="user-trash-symbolic", label="Supprimer"))
+        trash.set_child(Adw.ButtonContent(icon_name="user-trash-symbolic", label="Delete"))
         trash.connect("clicked", lambda *_: self._batch_trash())
         bar.pack_end(trash)
         for icon, label, tip, cb in (
-                ("document-save-symbolic", "Exporter", "Exporter pour Discord (dossier Exports)", self._batch_export),
-                ("edit-copy-symbolic", "Copier", "Copier les fichiers (à coller avec Ctrl+V)", self._batch_copy),
-                ("input-gaming-symbolic", "Jeu", "Définir le jeu", self._batch_game),
-                ("clips-star-symbolic", "Favoris", "Ajouter / retirer des favoris", self._batch_favorite)):
+                ("document-save-symbolic", "Export", "Export for Discord (Exports folder)", self._batch_export),
+                ("edit-copy-symbolic", "Copy", "Copy the files (paste them with Ctrl+V)", self._batch_copy),
+                ("input-gaming-symbolic", "Game", "Set the game", self._batch_game),
+                ("clips-star-symbolic", "Favorites", "Add to / remove from favorites", self._batch_favorite)):
             btn = Gtk.Button(css_classes=["flat"], tooltip_text=tip)
             btn.set_child(Adw.ButtonContent(icon_name=icon, label=label))
             btn.connect("clicked", lambda *_, c=cb: c())
@@ -1151,7 +1151,7 @@ class MainWindow(Adw.ApplicationWindow):
     def _update_selection(self):
         n = len(self.selected)
         self.sel_revealer.set_reveal_child(n > 0)
-        self.sel_label.set_label(f"{n} clip{'s' if n > 1 else ''} sélectionné{'s' if n > 1 else ''}")
+        self.sel_label.set_label(f"{n} clip{'s' if n > 1 else ''} selected")
         for box in self.cards:
             on = box.item.path in self.selected
             if box.sel.get_active() != on:
@@ -1176,10 +1176,10 @@ class MainWindow(Adw.ApplicationWindow):
         if not items:
             return
         n = len(items)
-        dialog = Adw.AlertDialog(heading=f"Mettre {n} clip{'s' if n > 1 else ''} à la corbeille ?",
-                                 body="Tu pourras les récupérer depuis la corbeille.")
-        dialog.add_response("cancel", "Annuler")
-        dialog.add_response("trash", "Corbeille")
+        dialog = Adw.AlertDialog(heading=f"Move {n} clip{'s' if n > 1 else ''} to the trash?",
+                                 body="You'll be able to recover them from the trash.")
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("trash", "Trash")
         dialog.set_response_appearance("trash", Adw.ResponseAppearance.DESTRUCTIVE)
 
         def resp(_d, r):
@@ -1187,7 +1187,7 @@ class MainWindow(Adw.ApplicationWindow):
                 self._stop_preview()
                 for it in items:
                     self.trash_clip(it.path, quiet=True)
-                self.toast(f"{n} clip{'s' if n > 1 else ''} mis à la corbeille")
+                self.toast(f"{n} clip{'s' if n > 1 else ''} moved to the trash")
                 self._clear_selection()
 
         dialog.connect("response", resp)
@@ -1200,7 +1200,7 @@ class MainWindow(Adw.ApplicationWindow):
         on = not all(it.favorite for it in items)
         for it in items:
             self._set_favorite(it, on)
-        self.toast("Ajoutés aux favoris" if on else "Retirés des favoris")
+        self.toast("Added to favorites" if on else "Removed from favorites")
 
     def _batch_game(self):
         items = self._selected_items()
@@ -1213,16 +1213,16 @@ class MainWindow(Adw.ApplicationWindow):
             return
         paths = [self._share_path(it) for it in items if it.path != self.library.recording_path]
         if None in paths:
-            self.toast("Préparation du son pour le partage… réessaie dans un instant")
+            self.toast("Preparing the audio for sharing… try again in a moment")
             return
         files = Gdk.FileList.new_from_array([Gio.File.new_for_path(p) for p in paths])
         self.get_clipboard().set_content(Gdk.ContentProvider.new_for_value(files))
         n = len(items)
-        self.toast(f"{n} fichier{'s' if n > 1 else ''} copié{'s' if n > 1 else ''} — colle avec Ctrl+V")
+        self.toast(f"{n} file{'s' if n > 1 else ''} copied — paste with Ctrl+V")
 
     def _discord_export(self, it, screen, finished):
-        """Export avec le préréglage Discord. screen : "0", "1"… (un écran) ou "m" (montage selon les bascules
-        enregistrées ; l'écran 1 s'il n'y en a pas)."""
+        """Export with the Discord preset. screen: "0", "1"… (one screen) or "m" (edit following the saved
+        switches; screen 1 if there are none)."""
         cfg = load_config()
         m = it.meta
         dur = max(m["duration"], 0.1)
@@ -1240,9 +1240,9 @@ class MainWindow(Adw.ApplicationWindow):
         if len(screens) > 1:
             only = None if screen == "m" else int(screen)
             plan = video_plan(segments, clip_angles(it.path), screens, only=only)
-            tag = "-montage" if only is None else f"-ecran{only + 1}"
+            tag = "-edit" if only is None else f"-screen{only + 1}"
         os.makedirs(exports_dir(cfg), exist_ok=True)
-        out = os.path.join(exports_dir(cfg), f"{it.stem}-{h or m['height']}p{fps or m['fps']}-{limit}mo{tag}.mp4")
+        out = os.path.join(exports_dir(cfg), f"{it.stem}-{h or m['height']}p{fps or m['fps']}-{limit}mb{tag}.mp4")
         Exporter(it.path, out, segments, h, fps, "h264", limit, 22, tracks, False,
                  lambda f: None, lambda ok, err: finished(ok, err, out), normalize=cfg.get("normalize_audio", True),
                  screens=screens, plan=plan).start()
@@ -1252,26 +1252,26 @@ class MainWindow(Adw.ApplicationWindow):
         if idx < 0 or self._is_recording(path):
             return
         it = self.library.store.get_item(idx)
-        what = "" if it.n_screens < 2 else " (montage)" if screen == "m" else f" (écran {int(screen) + 1})"
-        self.toast(f"Export pour Discord{what}…")
+        what = "" if it.n_screens < 2 else " (edit)" if screen == "m" else f" (screen {int(screen) + 1})"
+        self.toast(f"Exporting for Discord{what}…")
 
         def finished(ok, err, out):
             if ok:
-                self.toast(f"« {os.path.basename(out)} » prêt · {fmt_size(os.path.getsize(out))} (dossier Exports)")
+                self.toast(f"\"{os.path.basename(out)}\" ready · {fmt_size(os.path.getsize(out))} (Exports folder)")
             elif err:
-                self.toast(f"Échec de l'export : {err}")
+                self.toast(f"Export failed: {err}")
 
         def start(*_):
             if it.meta:
                 self._discord_export(it, screen, finished)
             else:
                 probe(it.path, lambda m: (setattr(it, "meta", m), self._discord_export(it, screen, finished)) if m
-                      else self.toast("Impossible de lire ce clip"))
+                      else self.toast("Couldn't read this clip"))
 
         ENCODER_DETECTOR.detect(start)
 
     def _batch_export(self):
-        """Exporte chaque clip sélectionné avec le préréglage Discord, l'un après l'autre (montage s'il y en a un)."""
+        """Exports each selected clip with the Discord preset, one after the other (the edit if there is one)."""
         queue = list(self._selected_items())
         if not queue:
             return
@@ -1279,11 +1279,11 @@ class MainWindow(Adw.ApplicationWindow):
 
         def next_clip():
             if not queue:
-                self.toast(f"{ok_count[0]}/{total} exporté{'s' if total > 1 else ''} pour Discord (dossier Exports)")
+                self.toast(f"{ok_count[0]}/{total} exported for Discord (Exports folder)")
                 self._update_selection()
                 return
             it = queue.pop(0)
-            self.sel_label.set_label(f"Export pour Discord… {total - len(queue)}/{total}")
+            self.sel_label.set_label(f"Exporting for Discord… {total - len(queue)}/{total}")
             if it.meta:
                 start(it)
             else:
@@ -1293,23 +1293,23 @@ class MainWindow(Adw.ApplicationWindow):
             def finished(ok, err, _out):
                 ok_count[0] += 1 if ok else 0
                 if not ok and err:
-                    self.toast(f"{it.stem} : {err}")
+                    self.toast(f"{it.stem}: {err}")
                 next_clip()
 
             self._discord_export(it, "m", finished)
 
         ENCODER_DETECTOR.detect(next_clip)
 
-    # ---- choix du jeu
+    # ---- game picker
     def pick_game(self, items, callback=None):
-        """Choix du jeu : jeux de la bibliothèque, jeux Steam installés, nom libre, ou aucun."""
-        dialog = Adw.Dialog(title="Jeu du clip" if len(items) == 1 else f"Jeu de {len(items)} clips",
+        """Game picker: games from the library, installed Steam games, free name, or none."""
+        dialog = Adw.Dialog(title="Clip's game" if len(items) == 1 else f"Game of {len(items)} clips",
                             content_width=420, content_height=540)
         view = Adw.ToolbarView()
         view.add_top_bar(Adw.HeaderBar())
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin_start=12, margin_end=12,
                       margin_bottom=12)
-        search = Gtk.SearchEntry(placeholder_text="Chercher ou saisir un nom de jeu")
+        search = Gtk.SearchEntry(placeholder_text="Search or type a game name")
         box.append(search)
         listbox = Gtk.ListBox(css_classes=["boxed-list"], selection_mode=Gtk.SelectionMode.NONE,
                               valign=Gtk.Align.START)
@@ -1333,19 +1333,19 @@ class MainWindow(Adw.ApplicationWindow):
                 try:
                     set_clip_game(it.path, name, appid)
                 except OSError as e:
-                    self.toast(f"Impossible : {e.strerror}")
+                    self.toast(f"Couldn't do it: {e.strerror}")
                     return
                 it.load_info()
                 it.emit("changed")
             self.side_key = None
             self._schedule_rebuild()
-            self.toast(f"Jeu défini : {name}" if name else "Jeu retiré")
+            self.toast(f"Game set: {name}" if name else "Game removed")
             dialog.close()
             if callback:
                 callback()
 
         def row(name, appid, subtitle=None, icon=None):
-            r = Adw.ActionRow(title=GLib.markup_escape_text(name or "Aucun jeu"), activatable=True)
+            r = Adw.ActionRow(title=GLib.markup_escape_text(name or "No game"), activatable=True)
             if subtitle:
                 r.set_subtitle(subtitle)
             tex = texture(game_art(appid).get("icon")) if appid else None
@@ -1364,9 +1364,9 @@ class MainWindow(Adw.ApplicationWindow):
                 listbox.remove(c)
             q = search.get_text().strip()
             if q and q.lower() not in (k.lower() for k in known):
-                listbox.append(row(q, None, subtitle="Utiliser ce nom", icon="list-add-symbolic"))
+                listbox.append(row(q, None, subtitle="Use this name", icon="list-add-symbolic"))
             if not q:
-                listbox.append(row(None, None, subtitle="Retirer le jeu", icon="window-close-symbolic"))
+                listbox.append(row(None, None, subtitle="Remove the game", icon="window-close-symbolic"))
             for name in sorted(known, key=str.lower):
                 if not q or q.lower() in name.lower():
                     listbox.append(row(name, known[name]))
@@ -1382,13 +1382,13 @@ class MainWindow(Adw.ApplicationWindow):
         fill()
         dialog.present(self)
 
-    # ---- renommage depuis la bibliothèque
+    # ---- renaming from the library
     def rename_dialog(self, item):
-        dialog = Adw.AlertDialog(heading="Renommer le clip")
+        dialog = Adw.AlertDialog(heading="Rename the clip")
         entry = Gtk.Entry(text=item.stem, activates_default=True)
         dialog.set_extra_child(entry)
-        dialog.add_response("cancel", "Annuler")
-        dialog.add_response("rename", "Renommer")
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("rename", "Rename")
         dialog.set_response_appearance("rename", Adw.ResponseAppearance.SUGGESTED)
         dialog.set_default_response("rename")
 
@@ -1398,9 +1398,9 @@ class MainWindow(Adw.ApplicationWindow):
             try:
                 rename_clip(item.path, entry.get_text())
             except FileExistsError:
-                self.toast("Un clip porte déjà ce nom")
+                self.toast("A clip already has this name")
             except OSError as e:
-                self.toast(f"Renommage impossible : {e.strerror}")
+                self.toast(f"Couldn't rename: {e.strerror}")
 
         dialog.connect("response", resp)
         dialog.present(self)
@@ -1414,12 +1414,12 @@ class MainWindow(Adw.ApplicationWindow):
         try:
             set_clip_favorite(item.path, on)
         except OSError as e:
-            self.toast(f"Impossible : {e.strerror}")
+            self.toast(f"Couldn't do it: {e.strerror}")
             return
-        item.emit("changed")   # met à jour la carte seule (pas de reconstruction : pas de clignotement)
+        item.emit("changed")   # only updates the card (no rebuild: no flicker)
         self.side_key = None
         if self.game_filter == "fav":
-            self._schedule_rebuild()   # la vue Favoris doit retirer / ajouter le clip
+            self._schedule_rebuild()   # the Favorites view must remove / add the clip
         else:
             store = self.library.store
             self._rebuild_sidebar([store.get_item(i) for i in range(store.get_n_items())])
@@ -1430,33 +1430,33 @@ class MainWindow(Adw.ApplicationWindow):
             return
         menu = Gio.Menu()
         target = GLib.Variant("s", item.path)
-        for entries in ((("Éditer", "win.clip-edit"), ("Lire en plein écran", "win.clip-fullscreen"),
-                         ("Renommer…", "win.clip-rename"), ("Définir le jeu…", "win.clip-game"),
-                         ("Retirer des favoris" if item.favorite else "Ajouter aux favoris", "win.clip-fav"),
-                         ("Sélectionner", "win.clip-select")),
-                        (("Copier le fichier", "win.clip-copy"), ("Afficher dans le dossier", "win.clip-show")),
-                        (("Mettre à la corbeille", "win.clip-trash"),)):
+        for entries in ((("Edit", "win.clip-edit"), ("Play fullscreen", "win.clip-fullscreen"),
+                         ("Rename…", "win.clip-rename"), ("Set the game…", "win.clip-game"),
+                         ("Remove from favorites" if item.favorite else "Add to favorites", "win.clip-fav"),
+                         ("Select", "win.clip-select")),
+                        (("Copy the file", "win.clip-copy"), ("Show in folder", "win.clip-show")),
+                        (("Move to the trash", "win.clip-trash"),)):
             section = Gio.Menu()
             for label, action in entries:
                 mi = Gio.MenuItem.new(label, None)
                 mi.set_action_and_target_value(action, target)
                 section.append_item(mi)
             menu.append_section(None, section)
-        # Export rapide pour Discord (préréglage Discord) : un écran au choix, ou le montage s'il y a des bascules
+        # Quick export for Discord (Discord preset): one screen of your choice, or the edit if there are switches
         quick = Gio.Menu()
         if item.n_screens > 1:
             screens = clip_screens(item.path)
             for k, sc in enumerate(screens):
-                quick.append_item(self._menu_item(f"Écran {k + 1} seul — {sc['monitor']}", "win.clip-export",
+                quick.append_item(self._menu_item(f"Screen {k + 1} only — {sc['monitor']}", "win.clip-export",
                                                   f"{k}\n{item.path}"))
             if len(clip_angles(item.path)) > 1:
-                quick.append_item(self._menu_item("Montage (bascules de l'éditeur)", "win.clip-export",
+                quick.append_item(self._menu_item("Edit (the editor's switches)", "win.clip-export",
                                                   f"m\n{item.path}"))
             section = Gio.Menu()
-            section.append_submenu("Exporter pour Discord", quick)
+            section.append_submenu("Export for Discord", quick)
             menu.insert_section(1, None, section)
         else:
-            quick.append_item(self._menu_item("Exporter pour Discord", "win.clip-export", f"0\n{item.path}"))
+            quick.append_item(self._menu_item("Export for Discord", "win.clip-export", f"0\n{item.path}"))
             menu.insert_section(1, None, quick)
         pop = Gtk.PopoverMenu(menu_model=menu, has_arrow=False, halign=Gtk.Align.START)
         pop.set_parent(box)
@@ -1480,12 +1480,12 @@ class MainWindow(Adw.ApplicationWindow):
         for w in (box.play, box.full, box.star, box.sel, box.trash):
             w.set_visible(not recording)
         previewing = bool(getattr(self, "preview", None)) and self.preview[0] is box
-        if not previewing:   # pendant un aperçu, la vidéo reste affichée
+        if not previewing:   # during a preview, the video stays displayed
             pic.set_paintable(item.texture)
         box.filling = True
         box.star.set_active(item.favorite)
         box.star.get_child().set_from_icon_name("clips-fav-on" if item.favorite else "clips-fav-off")
-        box.star.set_tooltip_text("Retirer des favoris" if item.favorite else "Ajouter aux favoris")
+        box.star.set_tooltip_text("Remove from favorites" if item.favorite else "Add to favorites")
         (box.star.add_css_class if item.favorite else box.star.remove_css_class)("on")
         box.filling = False
         if item.meta:
@@ -1497,7 +1497,7 @@ class MainWindow(Adw.ApplicationWindow):
         chip_icon.set_visible(icon is not None)
         chip_label.set_label(item.game or "")
         chip.set_visible(bool(item.game) and self.cfg.get("detect_game", True)
-                         and not self.game_filter.startswith("g:"))   # inutile dans la page d'un jeu
+                         and not self.game_filter.startswith("g:"))   # pointless on a game's page
         title.set_label(item.stem)
         box.set_tooltip_text(item.name)
         parts = [time.strftime("%H:%M", time.localtime(item.mtime))]
@@ -1505,8 +1505,8 @@ class MainWindow(Adw.ApplicationWindow):
             parts.append(f"{item.meta['height']}p{item.meta['fps']}")
         parts.append(fmt_size(item.size))
         if item.n_screens > 1:
-            parts.append(f"{item.n_screens} écrans")
-        sub.set_label("Enregistrement en cours…" if recording else " · ".join(parts))
+            parts.append(f"{item.n_screens} screens")
+        sub.set_label("Recording…" if recording else " · ".join(parts))
 
     def open_clip(self, path, fullscreen=False):
         if self._is_recording(path):
@@ -1521,11 +1521,11 @@ class MainWindow(Adw.ApplicationWindow):
         try:
             item = self.library.store.get_item(idx) if idx >= 0 else ClipItem(path)
         except OSError:
-            self.toast("Clip introuvable")
+            self.toast("Clip not found")
             return
         self.nav.push(EditorPage(self, item, fullscreen_only=fullscreen))
 
-    # ---- service replay
+    # ---- replay service
     def refresh_recorder_state(self):
         def done(ok, out, _e):
             active = out.decode().strip() == "active"
@@ -1536,13 +1536,13 @@ class MainWindow(Adw.ApplicationWindow):
             if active:
                 self.rec_dot.add_css_class("on")
                 self.rec_label.set_label(f"Replay {cfg['replay_seconds']} s")
-                self.rec_switch.set_tooltip_text(f"Replay actif — {SHORTCUT_LABEL} pour sauvegarder · "
-                                                 f"{shortcut_label('rec_start')} / {shortcut_label('rec_stop')} pour "
-                                                 "démarrer / arrêter un enregistrement")
+                self.rec_switch.set_tooltip_text(f"Replay running — {SHORTCUT_LABEL} to save · "
+                                                 f"{shortcut_label('rec_start')} / {shortcut_label('rec_stop')} to "
+                                                 "start / stop a recording")
             else:
                 self.rec_dot.remove_css_class("on")
-                self.rec_label.set_label("Replay coupé")
-                self.rec_switch.set_tooltip_text("Activer l'enregistrement en continu")
+                self.rec_label.set_label("Replay off")
+                self.rec_switch.set_tooltip_text("Turn on continuous recording")
 
         run_async(["systemctl", "--user", "is-active", SERVICE], done)
 
@@ -1552,7 +1552,7 @@ class MainWindow(Adw.ApplicationWindow):
         path = manual_recording_path() if started is not None else None
         if path != self.library.recording_path:
             old, self.library.recording_path = self.library.recording_path, path
-            if old and os.path.exists(old):   # enregistrement terminé : le clip complet « apparaît »
+            if old and os.path.exists(old):   # recording finished: the complete clip "appears"
                 idx = self.library.index(old)
                 if idx >= 0:
                     try:
@@ -1561,7 +1561,7 @@ class MainWindow(Adw.ApplicationWindow):
                         GLib.timeout_add(4000, lambda: (self.library.reread(it), False)[1])
                     except OSError:
                         pass
-            if path and self.library.index(path) < 0:   # sans attendre que le dossier signale le nouveau fichier
+            if path and self.library.index(path) < 0:   # without waiting for the folder to report the new file
                 self.library._add(path)
             self._schedule_rebuild()
         if started is not None:
@@ -1575,7 +1575,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         def done(ok, _o, err):
             if not ok:
-                self.toast(f"Erreur : {err.strip() or verb}")
+                self.toast(f"Error: {err.strip() or verb}")
             GLib.timeout_add(800, lambda: (self.refresh_recorder_state(), False)[1])
 
         run_async(["systemctl", "--user", verb, "--now", SERVICE], done)
@@ -1587,7 +1587,7 @@ class App(Adw.Application):
 
     def do_startup(self):
         Adw.Application.do_startup(self)
-        # Icônes propres à l'appli (début / fin de sélection…), recolorées selon le thème.
+        # The app's own icons (selection start / end…), recolored to match the theme.
         Gtk.IconTheme.get_for_display(Gdk.Display.get_default()).add_search_path(
             os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons"))
         Gtk.Window.set_default_icon_name(APP_ID)
@@ -1595,10 +1595,10 @@ class App(Adw.Application):
         css.load_from_string(CSS)
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), css,
                                                   Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
-        ENCODER_DETECTOR.detect()   # en arrière-plan, résultat mis en cache
+        ENCODER_DETECTOR.detect()   # in the background, result cached
 
     def do_shutdown(self):
-        # Arrêter GStreamer avant la fin du processus (sinon ses threads plantent à la sortie).
+        # Stop GStreamer before the process ends (otherwise its threads crash on exit).
         for win in self.get_windows():
             page = win.nav.get_visible_page() if isinstance(win, MainWindow) else None
             if isinstance(page, EditorPage):

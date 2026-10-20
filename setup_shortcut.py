@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Installe les raccourcis globaux de Clips selon l'environnement de bureau.
+"""Installs Clips' global shortcuts depending on the desktop environment.
 
-  Alt+F10  Sauvegarder un clip (les dernières secondes du replay)
-  Alt+F9   Démarrer un enregistrement
-  Alt+F11  Arrêter l'enregistrement
+  Alt+F10  Save a clip (the last seconds of the replay)
+  Alt+F9   Start a recording
+  Alt+F11  Stop the recording
 
-KDE Plasma : kglobalaccel (actif tout de suite et après redémarrage)
-GNOME / Cinnamon / Budgie / Unity : raccourcis personnalisés gsettings
-Autres (Hyprland, Sway, i3, XFCE…) : affiche les lignes à ajouter soi-même.
+KDE Plasma: kglobalaccel (active right away and after a reboot)
+GNOME / Cinnamon / Budgie / Unity: gsettings custom shortcuts
+Others (Hyprland, Sway, i3, XFCE…): prints the lines to add yourself.
 
-Usage : setup_shortcut.py [--remove]   Code retour 0 = installé, 2 = action manuelle requise.
+Usage: setup_shortcut.py [--remove]   Exit code 0 = installed, 2 = manual action required.
 """
 import ast
 import os
@@ -21,14 +21,14 @@ sys.path.insert(0, APP_DIR)
 from clips_common import SHORTCUTS, shortcut_label  # noqa: E402
 
 RECORD = os.path.join(APP_DIR, "record-clip")
-# (clé de SHORTCUTS, identifiant, nom affiché, commande, touche F pour KDE)
+# (SHORTCUTS key, identifier, display name, command, F key for KDE)
 ACTIONS = [
-    ("save", "clips-save", "Sauvegarder un clip", os.path.join(APP_DIR, "save-clip"), 10),
-    ("rec_start", "clips-rec-start", "Démarrer un enregistrement", f"{RECORD} start", 9),
-    ("rec_stop", "clips-rec-stop", "Arrêter un enregistrement", f"{RECORD} stop", 11),
+    ("save", "clips-save", "Save a clip", os.path.join(APP_DIR, "save-clip"), 10),
+    ("rec_start", "clips-rec-start", "Start a recording", f"{RECORD} start", 9),
+    ("rec_stop", "clips-rec-stop", "Stop a recording", f"{RECORD} stop", 11),
 ]
 GNOME_ROOT = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/"
-QT_ALT, QT_F1 = 0x08000000, 0x01000030   # codes Qt : modificateur Alt, touche F1 (F2 = F1 + 1…)
+QT_ALT, QT_F1 = 0x08000000, 0x01000030   # Qt codes: Alt modifier, F1 key (F2 = F1 + 1…)
 
 
 def desktop():
@@ -59,12 +59,12 @@ def kde(remove=False):
             f.write(f"[Desktop Entry]\nExec={cmd}\nName={name}\nNoDisplay=true\nStartupNotify=false\n"
                     "Type=Application\nX-KDE-GlobalAccel-CommandShortcut=true\n")
         call("doRegister", "(as)", (action,))
-        # SetPresent (2) | NoAutoloading (4) : sans SetPresent, KDE garde le raccourci inactif.
+        # SetPresent (2) | NoAutoloading (4): without SetPresent, KDE keeps the shortcut inactive.
         call("setShortcut", "(asaiu)", (action, [QT_ALT | (QT_F1 + fkey - 1)], 2 | 4))
     if remove:
-        return "Raccourcis KDE retirés."
-    return (f"Raccourcis installés dans KDE : {summary()}.\n"
-            "Configuration du système → Raccourcis pour les changer.")
+        return "KDE shortcuts removed."
+    return (f"Shortcuts installed in KDE: {summary()}.\n"
+            "System Settings → Shortcuts to change them.")
 
 
 def gnome(remove=False):
@@ -75,12 +75,12 @@ def gnome(remove=False):
     lst = [p for p in lst if p not in ours] + ([] if remove else ours)
     subprocess.run(["gsettings", "set", schema, "custom-keybindings", str(lst)], check=True)
     if remove:
-        return "Raccourcis GNOME retirés."
+        return "GNOME shortcuts removed."
     for (key, ident, name, cmd, _f), path in zip(ACTIONS, ours):
         kb = f"{schema}.custom-keybinding:{path}"
         for k, v in (("name", name), ("command", cmd), ("binding", SHORTCUTS[key])):
             subprocess.run(["gsettings", "set", kb, k, v], check=True)
-    return f"Raccourcis installés dans GNOME : {summary()}.\nParamètres → Clavier pour les changer."
+    return f"Shortcuts installed in GNOME: {summary()}.\nSettings → Keyboard to change them."
 
 
 def summary():
@@ -97,9 +97,9 @@ def manual():
             lines.append(f"bindsym Mod1+F{fkey} exec {cmd}      # {name}")
         else:
             lines.append(f"{shortcut_label(key)} → {cmd}      ({name})")
-    where = ("dans ~/.config/hypr/hyprland.conf" if "hyprland" in d else
-             "dans la config de sway/i3" if ("sway" in d or "i3" in d) else "dans les raccourcis de ton bureau")
-    return f"Raccourcis à ajouter {where} :\n  " + "\n  ".join(lines)
+    where = ("to ~/.config/hypr/hyprland.conf" if "hyprland" in d else
+             "to your sway/i3 config" if ("sway" in d or "i3" in d) else "to your desktop's shortcuts")
+    return f"Shortcuts to add {where}:\n  " + "\n  ".join(lines)
 
 
 def main():
@@ -112,8 +112,8 @@ def main():
         if any(x in d for x in ("gnome", "unity", "budgie", "pantheon")):
             print(gnome(remove))
             return 0
-    except Exception as e:  # noqa: BLE001 — on retombe sur l'explication manuelle
-        print(f"Échec de la configuration automatique ({e}).")
+    except Exception as e:  # noqa: BLE001 — fall back to the manual explanation
+        print(f"Automatic setup failed ({e}).")
     if not remove:
         print(manual())
     return 2

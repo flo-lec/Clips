@@ -1,4 +1,4 @@
-"""Widgets dessinés au GPU (snapshot GTK) : timeline, pistes audio avec courbe de volume, cartes de partage."""
+"""GPU-drawn widgets (GTK snapshot): timeline, audio tracks with volume curve, share cards."""
 import math
 import os
 
@@ -19,7 +19,7 @@ def fmt_time(t):
 
 
 def fmt_size(n):
-    return f"{n / 1e6:.1f} Mo" if n < 1e9 else f"{n / 1e9:.2f} Go"
+    return f"{n / 1e6:.1f} MB" if n < 1e9 else f"{n / 1e9:.2f} GB"
 
 
 def rect(x, y, w, h):
@@ -51,7 +51,7 @@ def rounded(x, y, w, h, r):
 
 
 def file_content_provider(path):
-    """Contenu à glisser/copier : liste de fichiers (+ text/uri-list explicite pour Electron/Discord)."""
+    """Content to drag/copy: file list (+ explicit text/uri-list for Electron/Discord)."""
     gfile = Gio.File.new_for_path(path)
     uri = gfile.get_uri() + "\r\n"
     return Gdk.ContentProvider.new_union([
@@ -61,7 +61,7 @@ def file_content_provider(path):
 
 
 def show_in_folder(path):
-    """Ouvre le gestionnaire de fichiers avec le fichier sélectionné (sinon le dossier)."""
+    """Opens the file manager with the file selected (otherwise the folder)."""
     try:
         Gio.DBusProxy.new_for_bus_sync(
             Gio.BusType.SESSION, Gio.DBusProxyFlags.NONE, None,
@@ -81,7 +81,7 @@ _TEXTURES = {}
 
 
 def texture(path):
-    """Texture mise en cache (images de jeux Steam, miniatures…) ; None si illisible."""
+    """Cached texture (Steam game images, thumbnails…); None if unreadable."""
     if not path:
         return None
     if path not in _TEXTURES:
@@ -107,15 +107,15 @@ def merge_ranges(ranges, min_len=0.05):
 # ---------------------------------------------------------------- timeline
 
 class TimelineCanvas(Gtk.Widget):
-    """Bande d'images, sélection, passages retirés, graduations. Redessinée seulement quand elle change :
-    la tête de lecture est un widget séparé, donc la lecture ne force pas de redessin."""
+    """Frame strip, selection, removed sections, ruler. Only redrawn when it changes:
+    the playhead is a separate widget, so playback doesn't force a redraw."""
     HANDLE = 12
-    KNOB_H = 16      # bande au-dessus des images : on y attrape la tête de lecture n'importe où
+    KNOB_H = 16      # band above the frames: the playhead can be grabbed anywhere in it
     STRIP_H = 58
     RULER_H = 18
-    EDGE = 7         # zone de prise des bords d'un passage retiré
-    BAND_H = 7       # bande des écrans (plusieurs écrans) : en bas des images
-    # pas de bleu : c'est la couleur du cadre de sélection
+    EDGE = 7         # grab zone of a removed section's edges
+    BAND_H = 7       # screens band (several screens): at the bottom of the frames
+    # no blue: it's the color of the selection frame
     SCREEN_COLORS = [(0.18, 0.76, 0.49), (0.96, 0.47, 0.0), (0.57, 0.38, 0.92), (0.93, 0.76, 0.13)]
 
     def __init__(self, duration, on_seek, on_range, on_cuts, on_cut_clicked, on_angles=None):
@@ -124,18 +124,18 @@ class TimelineCanvas(Gtk.Widget):
         self.t_in, self.t_out = 0.0, self.duration
         self.cuts = []
         self.pending_cut = None
-        self.moving = None          # passage déplacé : (indice, début, fin, borne basse, borne haute)
+        self.moving = None          # section being moved: (index, start, end, lower bound, upper bound)
         self.strip = None
         self.strip_frames = 1
         self.hover_x = None
         self.on_seek, self.on_range, self.on_cuts, self.on_cut_clicked = on_seek, on_range, on_cuts, on_cut_clicked
         self.on_angles = on_angles
-        self.angles = None          # plusieurs écrans : [[instant, écran], …] ; None = un seul écran
+        self.angles = None          # several screens: [[time, screen], …]; None = a single screen
         self.angle_drag = None
-        self.on_live = None         # appelé à chaque changement visible (lignes « pistes par écran » à redessiner)
+        self.on_live = None         # called on each visible change ("tracks per screen" rows to redraw)
         self.pos = 0.0
         self.edge = None
-        self.pending_start = None   # début d'un passage à retirer posé au clavier (C), en attente de la fin (V)
+        self.pending_start = None   # start of a section to remove set with the keyboard (C), waiting for the end (V)
         self.set_size_request(-1, self.KNOB_H + self.STRIP_H + self.RULER_H)
         self.set_hexpand(True)
         drag = Gtk.GestureDrag()
@@ -144,7 +144,7 @@ class TimelineCanvas(Gtk.Widget):
         drag.connect("drag-end", self._end)
         self.add_controller(drag)
         self.drag = drag
-        # clic droit sur un passage retiré : on le supprime (le passage revient dans le clip)
+        # right click on a removed section: delete it (the section comes back into the clip)
         right = Gtk.GestureClick(button=Gdk.BUTTON_SECONDARY)
         right.connect("pressed", self._on_right_click)
         self.add_controller(right)
@@ -156,7 +156,7 @@ class TimelineCanvas(Gtk.Widget):
         self.start_x = 0
         self.moved = False
 
-    # géométrie
+    # geometry
     def x_to_t(self, x):
         return min(max(x / max(self.get_width(), 1), 0), 1) * self.duration
 
@@ -174,7 +174,7 @@ class TimelineCanvas(Gtk.Widget):
         return None
 
     def _angle_marker(self, x, y):
-        """Bascule d'écran sous la souris (repère en bas des images), sauf la 1re (début du clip)."""
+        """Screen switch under the mouse (marker at the bottom of the frames), except the 1st (start of the clip)."""
         if not self.angles:
             return None
         band_top = self.KNOB_H + self.STRIP_H - self.BAND_H - 8
@@ -190,8 +190,8 @@ class TimelineCanvas(Gtk.Widget):
         self.queue_draw()
 
     def _hit(self, x, y):
-        # Priorité : tête de lecture (bande du haut ou ±8 px), bascules d'écran, bords des passages, poignées de
-        # l'extrait, intérieur d'un passage (on le déplace), puis le reste (on se positionne).
+        # Priority: playhead (top band or ±8 px), screen switches, section edges, the excerpt's
+        # handles, inside a section (move it), then the rest (seek).
         if y < self.KNOB_H or abs(x - self.t_to_x(self.pos)) <= 8:
             return "scrub"
         if self._angle_marker(x, y) is not None:
@@ -208,7 +208,7 @@ class TimelineCanvas(Gtk.Widget):
 
     def _on_right_click(self, gesture, _n, x, y):
         marker = self._angle_marker(x, y) if self.mode is None else None
-        if marker is not None:   # clic droit sur une bascule : supprimée
+        if marker is not None:   # right click on a switch: deleted
             gesture.set_state(Gtk.EventSequenceState.CLAIMED)
             del self.angles[marker]
             self.queue_draw()
@@ -229,10 +229,10 @@ class TimelineCanvas(Gtk.Widget):
             hit = self._hit(x, y)
             name = {"in": "ew-resize", "out": "ew-resize", "edge": "col-resize", "move": "grab",
                     "scrub": "grab", "angle": "col-resize"}.get(hit, "pointer")
-            tips = {"edge": "Glisser pour agrandir ou réduire le passage retiré",
-                    "angle": "Bascule d'écran · glisser pour la déplacer · clic droit pour la supprimer",
-                    "move": "Passage retiré · glisser pour le déplacer · clic droit pour le supprimer",
-                    "seek": "Clic : se placer ici · Maj + glisser : retirer un passage"}
+            tips = {"edge": "Drag to grow or shrink the removed section",
+                    "angle": "Screen switch · drag to move it · right click to delete it",
+                    "move": "Removed section · drag to move it · right click to delete it",
+                    "seek": "Click: seek here · Shift + drag: remove a section"}
             self.set_tooltip_text(tips.get(hit) if y >= self.KNOB_H else None)
             self.set_cursor(Gdk.Cursor.new_from_name(name))
         self._set_hover(x)
@@ -247,7 +247,7 @@ class TimelineCanvas(Gtk.Widget):
         self.mode = self._hit(x, y)
         shift = self.drag.get_current_event_state() & Gdk.ModifierType.SHIFT_MASK
         if shift and self.mode in ("seek", "move") and y >= self.KNOB_H:
-            self.mode = "cut"   # Maj + glisser : dessiner un passage à retirer
+            self.mode = "cut"   # Shift + drag: draw a section to remove
         if self.mode == "scrub":
             self.set_cursor(Gdk.Cursor.new_from_name("grabbing"))
             self.on_seek(self.x_to_t(x), False)
@@ -259,7 +259,7 @@ class TimelineCanvas(Gtk.Widget):
             t = self.x_to_t(x)
             self.pending_cut = [t, t]
         elif self.mode == "move":
-            # Le passage garde sa durée ; il ne passe ni sur ses voisins ni hors du clip.
+            # The section keeps its duration; it can't go over its neighbours or outside the clip.
             i = self.cut_at(self.x_to_t(x))
             a, b = self.cuts[i]
             lo = max([0.0] + [cb for ca, cb in self.cuts if cb <= a])
@@ -312,7 +312,7 @@ class TimelineCanvas(Gtk.Widget):
             self.angle_drag = None
             if self.moved and self.on_angles:
                 self.on_angles(self.angles)
-            elif not self.moved:   # simple clic sur une bascule : on s'y place
+            elif not self.moved:   # plain click on a switch: seek to it
                 self.on_seek(self.x_to_t(self.start_x), True)
         elif self.mode == "edge":
             self.on_cuts(merge_ranges(self.cuts))
@@ -326,7 +326,7 @@ class TimelineCanvas(Gtk.Widget):
             self.set_cursor(Gdk.Cursor.new_from_name("grab"))
             if self.moved:
                 self.on_cuts(merge_ranges(self.cuts))
-            else:   # simple clic dans un passage : on s'y place
+            else:   # plain click inside a section: seek to it
                 self.on_seek(self.x_to_t(self.start_x), True)
         else:
             self._apply(self.start_x + dx, final=True)
@@ -357,7 +357,7 @@ class TimelineCanvas(Gtk.Widget):
         self.queue_draw()
 
     def set_cuts(self, cuts):
-        self.cuts = [list(c) for c in cuts]   # copie : le glissement d'un bord ne touche pas l'historique
+        self.cuts = [list(c) for c in cuts]   # copy: dragging an edge doesn't touch the history
         self.queue_draw()
         if self.on_live:
             self.on_live()
@@ -366,7 +366,7 @@ class TimelineCanvas(Gtk.Widget):
         self.strip, self.strip_frames = texture, frames
         self.queue_draw()
 
-    # rendu
+    # rendering
     def _text(self, s, text, x, y, color):
         layout = self.create_pango_layout(text)
         lw, _ = layout.get_pixel_size()
@@ -381,7 +381,7 @@ class TimelineCanvas(Gtk.Widget):
         acc = accent()
         fg = self.get_color()
         red = rgba(0.88, 0.11, 0.14)
-        s.append_color(with_alpha(fg, 0.05), rect(0, 3, w, self.KNOB_H - 6))   # rail de la tête de lecture
+        s.append_color(with_alpha(fg, 0.05), rect(0, 3, w, self.KNOB_H - 6))   # playhead rail
         s.save()
         s.translate(point(0, self.KNOB_H))
 
@@ -401,7 +401,7 @@ class TimelineCanvas(Gtk.Widget):
         s.append_color(dim, rect(0, 0, xi, h))
         s.append_color(dim, rect(xo, 0, w - xo, h))
 
-        # passages retirés : rouge hachuré
+        # removed sections: hatched red
         cuts = list(self.cuts) + ([sorted(self.pending_cut)] if self.pending_cut else [])
         for a, b in cuts:
             x0, x1 = self.t_to_x(a), self.t_to_x(b)
@@ -415,35 +415,35 @@ class TimelineCanvas(Gtk.Widget):
             s.pop()
             s.append_color(red, rect(x0, 0, max(x1 - x0, 1), 3))
             s.append_color(red, rect(x0, h - 3, max(x1 - x0, 1), 3))
-            for xe in (x0, x1 - 4):   # bords saisissables
+            for xe in (x0, x1 - 4):   # grabbable edges
                 s.append_color(red, rect(xe, 0, 4, h))
                 s.append_color(rgba(1, 1, 1, 0.85), rect(xe + 1.5, h / 2 - 6, 1, 12))
             if x1 - x0 > 26:
                 self._text(s, "✂", (x0 + x1) / 2 - 6, h / 2 - 9, rgba(1, 1, 1, 0.95))
         s.pop()
 
-        # écrans (plusieurs écrans) : bande de couleur par écran + repères de bascule
+        # screens (several screens): color band per screen + switch markers
         if self.angles:
-            bh, yb = self.BAND_H, h - self.BAND_H - 3   # au-dessus du bord du cadre de sélection
+            bh, yb = self.BAND_H, h - self.BAND_H - 3   # above the edge of the selection frame
             for i, (t, k) in enumerate(self.angles):
                 x0 = self.t_to_x(t)
                 x1 = self.t_to_x(self.angles[i + 1][0]) if i + 1 < len(self.angles) else w
                 col = self.SCREEN_COLORS[k % len(self.SCREEN_COLORS)]
                 s.append_color(rgba(*col, 0.95), rect(x0, yb, x1 - x0, bh))
-                px = x0 + (14 if i == 0 else 8)   # pastille avec le n° d'écran (hors de la poignée de début)
+                px = x0 + (14 if i == 0 else 8)   # badge with the screen no. (clear of the start handle)
                 if x1 - px > 20:
                     s.push_rounded_clip(rounded(px, yb - 16, 15, 15, 4))
                     s.append_color(rgba(*col, 0.95), rect(px, yb - 16, 15, 15))
                     s.pop()
                     self._text(s, str(k + 1), px + 4, yb - 17, rgba(1, 1, 1, 1))
-                if i:   # repère de bascule (saisissable)
+                if i:   # switch marker (grabbable)
                     s.append_color(rgba(0, 0, 0, 0.5), rect(x0 - 2, 0, 4, h))
                     s.append_color(rgba(1, 1, 1, 0.95), rect(x0 - 1, 0, 2, h))
                     s.push_rounded_clip(rounded(x0 - 5, yb - 3, 10, bh + 6, 3))
                     s.append_color(rgba(1, 1, 1, 1), rect(x0 - 5, yb - 3, 10, bh + 6))
                     s.pop()
 
-        # cadre de sélection + poignées
+        # selection frame + handles
         s.append_color(acc, rect(xi, 0, xo - xi, 3))
         s.append_color(acc, rect(xi, h - 3, xo - xi, 3))
         for x in (xi, xo - 10):
@@ -455,7 +455,7 @@ class TimelineCanvas(Gtk.Widget):
         if self.hover_x is not None and self.mode is None:
             s.append_color(with_alpha(fg, 0.5), rect(self.hover_x - 0.5, 0, 1, h))
 
-        # graduations
+        # ruler
         step = next((st for st in (1, 2, 5, 10, 15, 30, 60, 120, 300, 600) if w / (self.duration / st) >= 60), 600)
         dimfg = with_alpha(fg, 0.45)
         t = 0.0
@@ -466,7 +466,7 @@ class TimelineCanvas(Gtk.Widget):
             t += step
         if self.hover_x is not None:
             self._text(s, fmt_time(self.x_to_t(self.hover_x)), self.hover_x + 4, h + 1, fg)
-        if self.pending_start is not None:   # repère « début du passage à retirer »
+        if self.pending_start is not None:   # "start of the section to remove" marker
             xs = self.t_to_x(self.pending_start)
             for y in range(0, int(h), 6):
                 s.append_color(red, rect(xs - 1, y, 2, 3))
@@ -476,8 +476,8 @@ class TimelineCanvas(Gtk.Widget):
 
 
 class PlayGlyph(Gtk.Widget):
-    """Lecture : triangle équilatéral aux coins arrondis, centré exactement (cadre englobant).
-    Pause : deux barres arrondies. Même dessin pour tous les boutons de lecture."""
+    """Play: equilateral triangle with rounded corners, exactly centered (bounding box).
+    Pause: two rounded bars. Same drawing for all the play buttons."""
 
     def __init__(self, size=30, color=None):
         super().__init__(can_target=False, halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
@@ -495,7 +495,7 @@ class PlayGlyph(Gtk.Widget):
         w, h = self.get_width(), self.get_height()
         side = self.size * 0.82
         color = self.color or self.get_color()
-        r = side * 0.09   # arrondi des coins
+        r = side * 0.09   # corner rounding
         if self.paused_icon:
             bw, gap = side * 0.28, side * 0.22
             x0 = (w - (2 * bw + gap)) / 2
@@ -504,8 +504,8 @@ class PlayGlyph(Gtk.Widget):
                 s.append_color(color, rect(x, (h - side) / 2, bw, side))
                 s.pop()
             return
-        th = side * 3 ** 0.5 / 2          # hauteur d'un triangle équilatéral de côté « side »
-        x0 = (w - th) / 2                 # cadre englobant centré
+        th = side * 3 ** 0.5 / 2          # height of an equilateral triangle with side "side"
+        x0 = (w - th) / 2                 # centered bounding box
         y0 = (h - side) / 2
         path = Gsk.PathBuilder.new()
         path.move_to(x0 + r, y0 + r * 1.2)
@@ -514,20 +514,20 @@ class PlayGlyph(Gtk.Widget):
         path.close()
         p = path.to_path()
         stroke = Gsk.Stroke.new(r * 2)
-        stroke.set_line_join(Gsk.LineJoin.ROUND)   # coins arrondis sans changer la taille
+        stroke.set_line_join(Gsk.LineJoin.ROUND)   # rounded corners without changing the size
         s.append_fill(p, Gsk.FillRule.WINDING, color)
         s.append_stroke(p, stroke, color)
 
 
 class Playhead(Gtk.Widget):
-    """Poignée + trait de la tête de lecture, sur toute la hauteur (timeline + pistes).
-    Les clics sont gérés par le canvas (bande du haut, ±8 px autour du trait)."""
+    """Playhead handle + line, over the full height (timeline + tracks).
+    Clicks are handled by the canvas (top band, ±8 px around the line)."""
     W = 18
 
     def __init__(self, timeline):
-        # Toute la largeur de la timeline : le trait est placé au dessin, d'après la largeur réelle du moment.
-        # Il suit donc toujours la timeline (même quand elle change de largeur), et la lecture ne coûte qu'un
-        # redessin, jamais une mise en page.
+        # The full width of the timeline: the line is placed at draw time, from the actual current width.
+        # So it always follows the timeline (even when its width changes), and playback only costs a
+        # redraw, never a layout.
         super().__init__(can_target=False, halign=Gtk.Align.FILL, valign=Gtk.Align.FILL)
         self.timeline = timeline
 
@@ -546,7 +546,7 @@ class Playhead(Gtk.Widget):
         acc = accent()
         shadow = rgba(0, 0, 0, 0.45)
         cx = self.W / 2
-        # le trait saute la règle graduée (lisibilité des temps), puis continue sur les pistes
+        # the line skips the ruler (keeps the times readable), then continues over the tracks
         for y0, y1 in ((12, ruler[0]), (ruler[0] + ruler[1], h)):
             if y1 > y0:
                 s.append_color(shadow, rect(cx - 2.5, y0, 5, y1 - y0))
@@ -562,15 +562,15 @@ class Playhead(Gtk.Widget):
 
 
 class ScreenRow(Gtk.Widget):
-    """Vue « pistes par écran » : la bande d'images d'un écran, placée sur la même échelle de temps que le clip.
-    Les passages où le montage montre cet écran sont en pleine lumière, les autres assombris.
-    Clic : regarder cet écran dans l'aperçu (à cet instant) ; clic droit : bascule du montage vers cet écran ici."""
+    """"Tracks per screen" view: a screen's frame strip, placed on the same time scale as the clip.
+    Sections where the edit shows this screen are fully lit, the others dimmed.
+    Click: watch this screen in the preview (at that time); right click: switch the edit to this screen here."""
     HEIGHT = 40
 
     def __init__(self, index, label, canvas, on_view, on_switch):
         super().__init__(hexpand=True, height_request=self.HEIGHT)
         self.index, self.label, self.canvas = index, label, canvas
-        self.range = (0.0, canvas.duration)   # instants du clip couverts par cet écran
+        self.range = (0.0, canvas.duration)   # clip times covered by this screen
         self.strip, self.frames = None, 1
         self.hover = False
         click = Gtk.GestureClick()
@@ -584,8 +584,8 @@ class ScreenRow(Gtk.Widget):
         motion.connect("leave", lambda *_: self._set_hover(False))
         self.add_controller(motion)
         self.set_cursor(Gdk.Cursor.new_from_name("pointer"))
-        self.set_tooltip_text(f"Écran {index + 1} — clic : le voir dans l'aperçu · "
-                              f"clic droit : basculer le montage sur cet écran à partir d'ici")
+        self.set_tooltip_text(f"Screen {index + 1} — click: view it in the preview · "
+                              f"right click: switch the edit to this screen from here")
 
     def _set_hover(self, on):
         self.hover = on
@@ -603,7 +603,7 @@ class ScreenRow(Gtk.Widget):
         s.push_rounded_clip(rounded(0, 0, w, h, 8))
         s.append_color(with_alpha(fg, 0.05), rect(0, 0, w, h))
         lo, hi = c.t_to_x(self.range[0]), c.t_to_x(self.range[1])
-        if self.strip and hi > lo:   # images de cet écran, sur la partie du clip qu'il couvre
+        if self.strip and hi > lo:   # this screen's frames, over the part of the clip it covers
             fw = h * self.strip.get_width() / self.frames / self.strip.get_height()
             cells = max(1, math.ceil((hi - lo) / fw))
             s.push_clip(rect(lo, 0, hi - lo, h))
@@ -616,14 +616,14 @@ class ScreenRow(Gtk.Widget):
             s.pop()
         dim = rgba(0, 0, 0, 0.66)
         angles = c.angles or [[0.0, 0]]
-        for i, (t, k) in enumerate(angles):   # assombri là où le montage montre un autre écran
+        for i, (t, k) in enumerate(angles):   # dimmed where the edit shows another screen
             x0 = c.t_to_x(t)
             x1 = c.t_to_x(angles[i + 1][0]) if i + 1 < len(angles) else w
             if k != self.index:
                 s.append_color(dim, rect(x0, 0, x1 - x0, h))
             else:
                 s.append_color(rgba(*col, 1), rect(x0, 0, x1 - x0, 3))
-        for a, b in c.cuts:   # passages retirés et hors de l'extrait : encore plus sombres
+        for a, b in c.cuts:   # removed sections and outside the excerpt: even darker
             s.append_color(rgba(0, 0, 0, 0.5), rect(c.t_to_x(a), 0, c.t_to_x(b) - c.t_to_x(a), h))
         s.append_color(rgba(0, 0, 0, 0.5), rect(0, 0, c.t_to_x(c.t_in), h))
         s.append_color(rgba(0, 0, 0, 0.5), rect(c.t_to_x(c.t_out), 0, w - c.t_to_x(c.t_out), h))
@@ -633,7 +633,7 @@ class ScreenRow(Gtk.Widget):
         if self.hover:
             s.append_color(with_alpha(fg, 0.08), rect(0, 0, w, h))
         s.pop()
-        # étiquette : pastille de couleur + nom de l'écran
+        # label: color badge + screen name
         layout = self.create_pango_layout(f"{self.index + 1}  {self.label}")
         lw, lh = layout.get_pixel_size()
         s.push_rounded_clip(rounded(6, (h - lh - 4) / 2, lw + 12, lh + 4, 6))
@@ -646,9 +646,9 @@ class ScreenRow(Gtk.Widget):
 
 
 class Timeline(Gtk.Overlay):
-    """Canvas (mis en cache par GTK) + pistes du mode avancé en dessous, alignées sur la même échelle.
-    La tête de lecture couvre toute la hauteur ; elle est déplacée par marge, donc la lecture ne force
-    aucun redessin du canvas ni des pistes."""
+    """Canvas (cached by GTK) + advanced-mode tracks below it, aligned on the same scale.
+    The playhead covers the full height; it is moved by margin, so playback forces
+    no redraw of the canvas or the tracks."""
     LANE_GAP = 4
 
     def __init__(self, duration, **callbacks):
@@ -656,13 +656,13 @@ class Timeline(Gtk.Overlay):
         self.canvas = TimelineCanvas(duration, **callbacks)
         self.column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=self.LANE_GAP)
         self.column.append(self.canvas)
-        # Vue « pistes par écran » (plusieurs écrans) : une ligne par écran, sous la bande du haut
+        # "Tracks per screen" view (several screens): one row per screen, under the top band
         self.rows = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=self.LANE_GAP, visible=False)
         self.column.append(self.rows)
         self.canvas.on_live = self.refresh_rows
         self.lanes = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=self.LANE_GAP)
-        # Seules les pistes défilent (la bande du haut reste en place) ; pas de barre ici : l'éditeur en
-        # place une à droite, hors de la timeline, pour garder la même échelle de temps partout.
+        # Only the tracks scroll (the top band stays in place); no scrollbar here: the editor puts
+        # one on the right, outside the timeline, to keep the same time scale everywhere.
         self.lanes_scroll = Gtk.ScrolledWindow(child=self.lanes, hscrollbar_policy=Gtk.PolicyType.NEVER,
                                                vscrollbar_policy=Gtk.PolicyType.EXTERNAL, visible=False)
         self.column.append(self.lanes_scroll)
@@ -681,7 +681,7 @@ class Timeline(Gtk.Overlay):
         self.rows.set_visible(on)
 
     def rows_height(self):
-        """Hauteur ajoutée par la vue « pistes par écran » (0 si masquée)."""
+        """Height added by the "tracks per screen" view (0 if hidden)."""
         n = 0
         child = self.rows.get_first_child()
         while child:
@@ -709,11 +709,11 @@ class Timeline(Gtk.Overlay):
             self.head.queue_draw()
 
 
-# ---------------------------------------------------------------- piste audio
+# ---------------------------------------------------------------- audio track
 
 class Lane(Gtk.Widget):
-    """Forme d'onde d'une piste ; en mode avancé, courbe de volume éditable (clic = point, glisser = déplacer,
-    clic droit / double-clic = supprimer)."""
+    """A track's waveform; in advanced mode, an editable volume curve (click = point, drag = move,
+    right click / double click = delete)."""
     PAD = 5
     R = 5
 
@@ -726,7 +726,7 @@ class Lane(Gtk.Widget):
         self.muted = False
         self.t_in, self.t_out = 0, self.duration
         self.cuts = []
-        self.points = []          # [[t, niveau]] niveau 0..2 (1 = 100 %)
+        self.points = []          # [[t, level]] level 0..2 (1 = 100 %)
         self.advanced = False
         self.on_points = on_points
         self.drag_idx = None
@@ -747,7 +747,7 @@ class Lane(Gtk.Widget):
         motion.connect("leave", lambda *_: self._set_hover(None))
         self.add_controller(motion)
 
-    HEIGHT = 46   # hauteur par défaut (réglable : set_height)
+    HEIGHT = 46   # default height (adjustable: set_height)
 
     def _size(self):
         self.set_size_request(-1, getattr(self, "height", self.HEIGHT) if self.advanced else 34)
@@ -761,7 +761,7 @@ class Lane(Gtk.Widget):
         self.advanced = on
         self._size()
         self.set_cursor(Gdk.Cursor.new_from_name("crosshair") if on else None)
-        self.set_tooltip_text("Clic : ajouter un point · glisser : régler · clic droit : supprimer" if on else None)
+        self.set_tooltip_text("Click: add a point · drag: adjust · right click: delete" if on else None)
         self.queue_draw()
 
     def set_peaks(self, peaks):
@@ -776,7 +776,7 @@ class Lane(Gtk.Widget):
         self.points = [list(p) for p in pts]
         self.queue_draw()
 
-    # géométrie
+    # geometry
     def _xy(self, t, v):
         w, h = self.get_width(), self.get_height()
         return t / self.duration * w, self.PAD + (1 - v / 2) * (h - 2 * self.PAD)
@@ -786,7 +786,7 @@ class Lane(Gtk.Widget):
         t = min(max(x / max(w, 1), 0), 1) * self.duration
         v = min(max((1 - (y - self.PAD) / max(h - 2 * self.PAD, 1)) * 2, 0), 2)
         if abs(v - 1) < 0.04:
-            v = 1.0    # aimant sur 100 %
+            v = 1.0    # snap to 100 %
         return t, v
 
     def _hit(self, x, y):
@@ -849,7 +849,7 @@ class Lane(Gtk.Widget):
         self.queue_draw()
         self.on_points([tuple(p) for p in self.points], live)
 
-    # rendu
+    # rendering
     def do_snapshot(self, s):
         w, h = self.get_width(), self.get_height()
         fg = self.get_color()
@@ -878,14 +878,14 @@ class Lane(Gtk.Widget):
 
         if not self.advanced:
             return
-        # repère 100 %
+        # 100 % marker
         _, y100 = self._xy(0, 1)
         dash = Gsk.PathBuilder.new()
         for x in range(0, int(w), 8):
             dash.move_to(x, y100)
             dash.line_to(x + 4, y100)
         s.append_stroke(dash.to_path(), Gsk.Stroke.new(1), with_alpha(fg, 0.35))
-        # courbe
+        # curve
         line = Gsk.PathBuilder.new()
         pts = self.points or [[0, 1.0]]
         x0, y0 = self._xy(0, pts[0][1])
@@ -921,19 +921,19 @@ class Lane(Gtk.Widget):
         return p[-1][1]
 
 
-# ---------------------------------------------------------------- partage
+# ---------------------------------------------------------------- sharing
 
 class ShareTile(Gtk.Box):
-    """Carte à glisser-déposer (Discord, navigateur, gestionnaire de fichiers…) avec copie dans le presse-papiers."""
+    """Drag-and-drop card (Discord, browser, file manager…) with copy to the clipboard."""
 
     def __init__(self, title, toast, audio=False):
         super().__init__(orientation=Gtk.Orientation.HORIZONTAL, spacing=12, css_classes=["card", "share-tile"])
         self.audio = audio
         self.path = None
-        self.resolve = None   # fichier réellement envoyé (ex. version au son mixé) ; None = pas encore prêt
+        self.resolve = None   # file actually sent (e.g. version with mixed audio); None = not ready yet
         self.toast = toast
         self.texture = None
-        if audio:   # fichier son : une icône à la place de la miniature
+        if audio:   # audio file: an icon instead of the thumbnail
             self.picture = None
             thumb = Gtk.Box(css_classes=["audio-thumb"], width_request=96, height_request=54, valign=Gtk.Align.CENTER)
             thumb.append(Gtk.Image(icon_name="audio-x-generic-symbolic", pixel_size=24, hexpand=True,
@@ -942,7 +942,7 @@ class ShareTile(Gtk.Box):
             self.picture = Gtk.Picture(content_fit=Gtk.ContentFit.COVER, width_request=96, height_request=54,
                                        can_shrink=True, valign=Gtk.Align.CENTER)
             thumb = self.picture
-        # Pastille « pas à jour » (l'édit a changé depuis cet export), en coin de la miniature
+        # "Out of date" badge (the edit changed since this export), in the corner of the thumbnail
         frame = Gtk.Overlay(child=thumb, valign=Gtk.Align.CENTER)
         self.stale_badge = Gtk.Image(icon_name="dialog-warning-symbolic", pixel_size=14, css_classes=["stale-badge"],
                                      halign=Gtk.Align.END, valign=Gtk.Align.START, margin_top=3, margin_end=3,
@@ -958,10 +958,10 @@ class ShareTile(Gtk.Box):
         text.append(head)
         text.append(self.subtitle)
         self.append(text)
-        copy = Gtk.Button(icon_name="edit-copy-symbolic", tooltip_text="Copier le fichier (à coller avec Ctrl+V)",
+        copy = Gtk.Button(icon_name="edit-copy-symbolic", tooltip_text="Copy the file (paste it with Ctrl+V)",
                           valign=Gtk.Align.CENTER, css_classes=["flat", "circular"])
         copy.connect("clicked", self._copy)
-        folder = Gtk.Button(icon_name="folder-open-symbolic", tooltip_text="Afficher dans le dossier",
+        folder = Gtk.Button(icon_name="folder-open-symbolic", tooltip_text="Show in folder",
                             valign=Gtk.Align.CENTER, css_classes=["flat", "circular"])
         folder.connect("clicked", lambda *_: self.path and show_in_folder(self.path))
         self.buttons = (copy, folder)
@@ -979,7 +979,7 @@ class ShareTile(Gtk.Box):
             return None
         path = self.resolve() if self.resolve else self.path
         if path is None:
-            self.toast("Préparation du son pour le partage… réessaie dans un instant")
+            self.toast("Preparing the audio for sharing… try again in a moment")
             return None
         return file_content_provider(path)
 
@@ -987,14 +987,14 @@ class ShareTile(Gtk.Box):
         content = self._content()
         if content:
             self.get_clipboard().set_content(content)
-            self.toast("Fichier copié — colle-le avec Ctrl+V")
+            self.toast("File copied — paste it with Ctrl+V")
 
     def set_stale(self, stale):
-        """Export plus à jour avec l'édit : pastille orange + contour, et info-bulle explicative."""
+        """Export no longer matches the edit: orange badge + outline, and an explanatory tooltip."""
         self.stale_badge.set_visible(stale)
         (self.add_css_class if stale else self.remove_css_class)("stale")
-        self.set_tooltip_text("Pas à jour : l'édit a changé depuis cet export — clique sur Exporter pour le refaire"
-                              if stale else ("Glisser vers Discord, un navigateur, le gestionnaire de fichiers…"
+        self.set_tooltip_text("Out of date: the edit changed since this export — click Export to redo it"
+                              if stale else ("Drag to Discord, a browser, the file manager…"
                                              if self.path else None))
 
     def set_file(self, path, subtitle, texture=None, resolve=None):
@@ -1009,7 +1009,7 @@ class ShareTile(Gtk.Box):
         if self.path:
             self.remove_css_class("disabled")
             self.set_cursor(Gdk.Cursor.new_from_name("grab"))
-            self.set_tooltip_text("Glisser vers Discord, un navigateur, le gestionnaire de fichiers…")
+            self.set_tooltip_text("Drag to Discord, a browser, the file manager…")
         else:
             self.add_css_class("disabled")
             self.set_cursor(None)

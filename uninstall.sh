@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Désinstalle Clips. Les clips enregistrés et la configuration sont conservés,
-# sauf avec --purge (supprime aussi ~/.config/clips et le cache, jamais les vidéos).
+# Uninstalls Clips. Recorded clips and the configuration are kept,
+# except with --purge (also deletes ~/.config/clips and the cache, never the videos).
 set -uo pipefail
 DATA="${XDG_DATA_HOME:-$HOME/.local/share}"
 DEST="$DATA/clips"
@@ -14,4 +14,4 @@ if [[ "${1:-}" == "--purge" ]]; then
     rm -rf "${XDG_CONFIG_HOME:-$HOME/.config}/clips" "${XDG_CACHE_HOME:-$HOME/.cache}/clips"
 fi
 rm -rf "$DEST"
-echo "Clips est désinstallé. Tes clips restent dans ton dossier Vidéos."
+echo "Clips is uninstalled. Your clips stay in your Videos folder."

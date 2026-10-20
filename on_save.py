@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Appelé par gpu-screen-recorder après chaque sauvegarde : <chemin> <type>.
+"""Called by gpu-screen-recorder after each save: <path> <type>.
 
-1. Tout de suite (rapide) : détecte le jeu, renomme le clip (« Black Mesa 2026-10-14 01-20-08.mp4 »),
-   écrit le fichier annexe (pistes + jeu).
-2. Dans un processus détaché : son de confirmation + notification (« Éditer » / « Ouvrir le dossier »).
-Aucune fenêtre n'est ouverte ni activée : le jeu garde le focus.
+1. Right away (fast): detects the game, renames the clip ("Black Mesa 2026-10-14 01-20-08.mp4"),
+   writes the sidecar file (tracks + game).
+2. In a detached process: confirmation sound + notification ("Edit" / "Open folder").
+No window is opened or activated: the game keeps the focus.
 """
 import os
 import subprocess
@@ -18,7 +18,7 @@ from clips_common import (APP_DIR, detect_game, layer_shell_available, load_conf
 
 
 def _read_ts(path):
-    """Fichier .ts de gpu-screen-recorder (horodatage de la 1re image) → microsecondes monotones, puis supprimé."""
+    """gpu-screen-recorder .ts file (timestamp of the 1st frame) → monotonic microseconds, then deleted."""
     try:
         with open(path) as f:
             value = int(f.read().split()[2])
@@ -30,7 +30,7 @@ def _read_ts(path):
 
 def _duration(path):
     try:
-        # durée de la vidéo (pas du fichier : les pistes audio peuvent dépasser de quelques ms)
+        # duration of the video (not the file: audio tracks can run a few ms longer)
         return float(subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
                                      "stream=duration", "-of", "csv=p=0", path],
                                     capture_output=True, text=True, timeout=10).stdout)
@@ -39,8 +39,8 @@ def _duration(path):
 
 
 def other_screens(cfg, path, kind):
-    """Fichiers des autres écrans sauvegardés en même temps que le clip (dossiers d'arrivée), une fois complets.
-    Retourne [(écran, chemin, décalage en s)]."""
+    """Files of the other screens saved at the same time as the clip (incoming folders), once complete.
+    Returns [(screen, path, offset in s)]."""
     primary_ts = _read_ts(path + ".ts")
     found = []
     for mon in extra_monitors(cfg):
@@ -65,11 +65,11 @@ def _wait_screen(cfg, mon, path, kind, primary_ts):
             cand = max(found, key=lambda e: e.stat().st_mtime).path
             size = os.path.getsize(cand)
             time.sleep(0.4)
-            if size and os.path.getsize(cand) == size:   # écriture terminée
+            if size and os.path.getsize(cand) == size:   # writing finished
                 second_ts = _read_ts(cand + ".ts")
                 if kind == "regular" and primary_ts and second_ts:
-                    offset = (second_ts - primary_ts) / 1e6   # même horloge : décalage exact
-                else:   # replay : tous sauvegardés au même instant, donc finissent ensemble
+                    offset = (second_ts - primary_ts) / 1e6   # same clock: exact offset
+                else:   # replay: all saved at the same instant, so they end together
                     d1, d2 = _duration(path), _duration(cand)
                     offset = (d1 - d2) if d1 and d2 else 0.0
                 return cand, offset
@@ -92,7 +92,7 @@ def attach_screens(cfg, final, found):
 
 
 def clean_incoming(cfg):
-    """Fichiers du 2e écran jamais rattachés (sauvegarde ratée) : effacés au bout d'une heure."""
+    """2nd-screen files never attached (failed save): deleted after an hour."""
     root = os.path.join(screens_dir(cfg["clips_dir"]), "incoming")
     limit = time.time() - 3600
     for d, _dirs, files in os.walk(root):
@@ -106,10 +106,10 @@ def clean_incoming(cfg):
 
 
 def finalize(path, kind="replay"):
-    """Renomme selon le jeu détecté, rattache le 2e écran et écrit les métadonnées.
-    Retourne (chemin final, jeu)."""
+    """Renames after the detected game, attaches the 2nd screen and writes the metadata.
+    Returns (final path, game)."""
     cfg = load_config()
-    # Avant le renommage : la bibliothèque voit arriver le clip avec ses écrans déjà rattachés.
+    # Before renaming: the library sees the clip arrive with its screens already attached.
     screens = other_screens(cfg, path, kind)
     game, appid = detect_game() if cfg.get("detect_game", True) else (None, None)
     if game and os.path.exists(path):
@@ -119,7 +119,7 @@ def finalize(path, kind="replay"):
         while os.path.exists(dest):
             dest, n = f"{base} ({n}){os.path.splitext(path)[1]}", n + 1
         try:
-            # Métadonnées d'abord : la bibliothèque voit le clip renommé avec son jeu déjà connu.
+            # Metadata first: the library sees the renamed clip with its game already known.
             save_clip_meta(dest, read_recording(), game, appid)
             attach_screens(cfg, dest, screens)
             os.rename(path, dest)
@@ -143,16 +143,16 @@ def notify(path, game, kind="replay"):
     if popup and layer_shell_available():
         subprocess.Popen([sys.executable, os.path.join(APP_DIR, "popup.py"), path, game or "", kind],
                          start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        popup = False   # affiché
+        popup = False   # shown
     if not cfg.get("save_notification", True) and not popup:
         return
     size_mb = os.path.getsize(path) / 1e6 if os.path.exists(path) else 0
-    title = "Enregistrement sauvegardé" if kind == "regular" else "Clip enregistré"
+    title = "Recording saved" if kind == "regular" else "Clip saved"
     title = f"{title} — {game}" if game else title
-    # Icône de Clips + rattachement à l'appli (desktop-entry) ; disparaît seule au bout de 6 s.
+    # Clips icon + link to the app (desktop-entry); disappears on its own after 6 s.
     argv = ["notify-send", "-a", "Clips", "-i", "local.clips.Clips", "-h", "string:desktop-entry:local.clips.Clips",
-            "-t", "6000", "-w", "-A", "edit=Éditer", "-A", "folder=Ouvrir le dossier"]
-    res = subprocess.run(argv + [title, f"{os.path.basename(path)} — {size_mb:.0f} Mo"],
+            "-t", "6000", "-w", "-A", "edit=Edit", "-A", "folder=Open folder"]
+    res = subprocess.run(argv + [title, f"{os.path.basename(path)} — {size_mb:.0f} MB"],
                          capture_output=True, text=True)
     action = res.stdout.strip()
     if action == "edit":
@@ -168,7 +168,7 @@ if __name__ == "__main__":
         notify(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 and sys.argv[2] else None,
                sys.argv[3] if len(sys.argv) > 3 else "replay")
     else:
-        # gpu-screen-recorder : <chemin> <type> (« replay », ou « regular » pour un enregistrement manuel)
+        # gpu-screen-recorder: <path> <type> ("replay", or "regular" for a manual recording)
         kind = sys.argv[2] if len(sys.argv) > 2 else "replay"
         final, game = finalize(sys.argv[1], kind)
         env = {**os.environ, "CLIPS_ON_SAVE_CHILD": "1"}

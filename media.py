@@ -1,4 +1,4 @@
-"""Médias : sondes ffprobe, file de tâches, lecture GStreamer et export ffmpeg (tout GPU)."""
+"""Media: ffprobe probes, job queue, GStreamer playback and ffmpeg export (all GPU)."""
 import hashlib
 import json
 import os
@@ -15,10 +15,10 @@ from gi.repository import Gio, GLib, Gst, GstController  # noqa: E402
 from clips_common import CACHE_DIR, render_node  # noqa: E402
 
 
-# ---------------------------------------------------------------- processus
+# ---------------------------------------------------------------- processes
 
 def run_async(argv, callback=None, want_stdout=True):
-    """Lance une commande sans bloquer l'interface ; callback(ok, stdout_bytes, stderr_text)."""
+    """Runs a command without blocking the UI; callback(ok, stdout_bytes, stderr_text)."""
     flags = Gio.SubprocessFlags.STDERR_PIPE
     flags |= Gio.SubprocessFlags.STDOUT_PIPE if want_stdout else Gio.SubprocessFlags.STDOUT_SILENCE
     try:
@@ -44,7 +44,7 @@ def run_async(argv, callback=None, want_stdout=True):
 
 
 class JobQueue:
-    """Limite le nombre de ffmpeg/ffprobe lancés en parallèle (miniatures, sondes, formes d'onde)."""
+    """Limits the number of ffmpeg/ffprobe running in parallel (thumbnails, probes, waveforms)."""
 
     def __init__(self, max_parallel=2):
         self.max = max_parallel
@@ -77,13 +77,13 @@ def cache_key(path, extra=""):
     return hashlib.sha1(f"{path}|{st.st_mtime_ns}|{st.st_size}|{extra}".encode()).hexdigest()
 
 
-# ---------------------------------------------------------------- plusieurs écrans
+# ---------------------------------------------------------------- several screens
 
 _INFO = {}
 
 
 def video_info(path):
-    """(durée, largeur, hauteur, i/s) de la vidéo d'un fichier — appel bloquant (~30 ms), mis en cache."""
+    """(duration, width, height, fps) of a file's video — blocking call (~30 ms), cached."""
     try:
         key = cache_key(path)
     except OSError:
@@ -103,7 +103,7 @@ def video_info(path):
 
 
 def angle_at(angles, t):
-    """Écran affiché à l'instant t selon les bascules [[instant, écran], …] (triées)."""
+    """Screen shown at time t according to the switches [[time, screen], …] (sorted)."""
     k = 0
     for at, screen in angles:
         if at <= t + 1e-6:
@@ -114,20 +114,20 @@ def angle_at(angles, t):
 
 
 def screen_range(screen):
-    """Instants du clip couverts par un écran : [début, fin)."""
+    """Clip times covered by a screen: [start, end)."""
     info = video_info(screen["path"])
     dur = info[0] if info else 0.0
     return screen["offset"], screen["offset"] + dur
 
 
 def video_plan(segments, angles, screens, only=None):
-    """Morceaux (début, fin, écran) dans le temps du clip, pour les passages gardés.
-    only=None : montage selon les bascules ; only=k : tout sur l'écran k.
-    Là où un écran n'a pas d'image (avant son début, après sa fin), on reprend l'écran principal."""
+    """Pieces (start, end, screen) in clip time, for the kept sections.
+    only=None: edit following the switches; only=k: everything on screen k.
+    Where a screen has no frame (before its start, after its end), fall back to the main screen."""
     switches = [[0.0, only]] if only is not None else sorted(angles or [[0.0, 0]])
     ranges = {k: screen_range(sc) for k, sc in enumerate(screens) if k}
     plan = []
-    joinable = [False]   # faux juste après une coupe : deux passages séparés ne fusionnent jamais
+    joinable = [False]   # false right after a cut: two separate sections never merge
 
     def add(s, e, k):
         if e - s < 1e-3:
@@ -153,24 +153,24 @@ def video_plan(segments, angles, screens, only=None):
     return plan
 
 
-# ---------------------------------------------------------------- partage
+# ---------------------------------------------------------------- sharing
 
 SHARE_DIR = os.path.join(CACHE_DIR, "share")
 
 
 class ShareCache:
-    """Version « à partager » d'un clip à plusieurs pistes audio : vidéo recopiée telle quelle (instantané), pistes
-    mixées en une seule. Discord, les navigateurs et la plupart des lecteurs ne lisent que la 1re piste d'un fichier :
-    sans ce mix, le micro, le vocal… disparaissent. Préparée en tâche de fond (ouverture de l'éditeur, survol d'une
-    carte) ; le fichier garde le nom du clip."""
-    SYNC_MAX_S = 90   # clip plus long pas encore prêt : on ne bloque pas le glisser, on prévient
+    """"Shareable" version of a clip with several audio tracks: video copied as is (instant), tracks
+    mixed into one. Discord, browsers and most players only play the 1st track of a file:
+    without this mix, the mic, the voice chat… disappear. Prepared in the background (editor opening, hovering
+    a card); the file keeps the clip's name."""
+    SYNC_MAX_S = 90   # longer clip not ready yet: don't block the drag, warn instead
 
     def __init__(self):
-        self.waiting = {}   # fichier en préparation -> callbacks
+        self.waiting = {}   # file being prepared -> callbacks
 
     @staticmethod
     def needed(gains, audio=False):
-        # Vidéo : seulement s'il y a plusieurs pistes à mixer. Audio : toujours (on extrait le son en MP3).
+        # Video: only if there are several tracks to mix. Audio: always (the audio is extracted as MP3).
         return bool(gains) if audio else len(gains) > 1
 
     def target(self, src, gains, audio=False):
@@ -182,17 +182,17 @@ class ShareCache:
         n = len(gains)
         graph = ";".join(f"[0:a:{i}]volume={g:.3f}[t{i}]" for i, g in enumerate(gains))
         graph += ";" + "".join(f"[t{i}]" for i in range(n)) + f"amix=inputs={n}:normalize=0:dropout_transition=0[a]"
-        # En tâche de fond, sans gêner la lecture ni le jeu : priorité basse, 2 fils.
+        # In the background, without disturbing playback or the game: low priority, 2 threads.
         a = ["nice", "-n", "15", "ffmpeg", "-v", "error", "-nostdin", "-y", "-threads", "2", "-i", src,
              "-filter_complex", graph]
-        if audio:   # son seul : MP3 (lu partout, et lisible directement dans Discord)
+        if audio:   # audio only: MP3 (plays everywhere, and directly playable in Discord)
             return a + ["-map", "[a]", "-c:a", "libmp3lame", "-b:a", "192k", out]
-        # « fast » : 2× moins de calcul que le codeur AAC par défaut, sans différence audible à 192k.
+        # "fast": 2× less computation than the default AAC coder, no audible difference at 192k.
         return a + ["-map", "0:v:0", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-aac_coder", "fast",
                     "-b:a", "192k", "-movflags", "+faststart", out]
 
     def ready(self, src, gains, audio=False):
-        """Chemin à partager s'il est disponible tout de suite (le clip lui-même s'il n'a qu'une piste), sinon None."""
+        """Path to share if available right away (the clip itself if it has only one track), otherwise None."""
         if not self.needed(gains, audio):
             return src
         try:
@@ -202,7 +202,7 @@ class ShareCache:
         return out if os.path.exists(out) else None
 
     def prepare(self, src, gains, callback=None, audio=False):
-        """Prépare en arrière-plan ; callback(chemin) — le clip d'origine si le mix échoue."""
+        """Prepares in the background; callback(path) — the original clip if the mix fails."""
         path = self.ready(src, gains, audio)
         if path:
             if callback:
@@ -226,8 +226,8 @@ class ShareCache:
         JOBS.add(self._argv(src, gains, part, audio), done)
 
     def get_sync(self, src, gains, duration, audio=False):
-        """Pour un glisser-déposer : le fichier à donner, en le préparant sur place si le clip est court.
-        None = clip long pas encore prêt (la préparation est lancée)."""
+        """For a drag-and-drop: the file to hand over, preparing it on the spot if the clip is short.
+        None = long clip not ready yet (preparation started)."""
         path = self.ready(src, gains, audio)
         if path:
             return path
@@ -247,7 +247,7 @@ class ShareCache:
 
     @staticmethod
     def prune(max_age_days=3):
-        """Les copies de partage ne servent qu'au moment d'envoyer : on les efface au bout de quelques jours."""
+        """Share copies are only useful at sending time: delete them after a few days."""
         limit = time.time() - max_age_days * 86400
         try:
             entries = list(os.scandir(SHARE_DIR))
@@ -268,8 +268,8 @@ META_DIR = os.path.join(CACHE_DIR, "meta")
 
 
 def probe(path, callback):
-    """Infos d'un clip (durée, taille, pistes…). Gardées en cache disque : au lancement, une bibliothèque
-    déjà vue ne relance aucun ffprobe."""
+    """A clip's info (duration, size, tracks…). Kept in a disk cache: at startup, an already-seen
+    library runs no ffprobe."""
     try:
         cached = os.path.join(META_DIR, cache_key(path, "probe1") + ".json")
         with open(cached) as f:
@@ -312,28 +312,28 @@ def probe(path, callback):
     JOBS.add(argv, done, front=True)
 
 
-# ---------------------------------------------------------------- encodeurs
+# ---------------------------------------------------------------- encoders
 
 ENCODERS = {
     "h264": [("vaapi", "h264_vaapi"), ("nvenc", "h264_nvenc"), ("qsv", "h264_qsv"), ("sw", "libx264")],
     "hevc": [("vaapi", "hevc_vaapi"), ("nvenc", "hevc_nvenc"), ("qsv", "hevc_qsv"), ("sw", "libx265")],
     "av1": [("vaapi", "av1_vaapi"), ("nvenc", "av1_nvenc"), ("qsv", "av1_qsv"), ("sw", "libsvtav1")],
 }
-BACKEND_LABELS = {"vaapi": "GPU (VA-API)", "nvenc": "GPU NVIDIA", "qsv": "GPU Intel (QSV)", "sw": "processeur"}
+BACKEND_LABELS = {"vaapi": "GPU (VA-API)", "nvenc": "NVIDIA GPU", "qsv": "Intel GPU (QSV)", "sw": "CPU"}
 
 
 class EncoderDetector:
-    """Teste une fois quel encodeur fonctionne réellement sur cette machine, puis chronomètre la carte graphique
-    contre le processeur sur un court échantillon 1440p60 animé : le plus rapide sert aux exports (réglage
-    « Automatique »). Selon la machine — et les enregistreurs du replay qui occupent déjà l'encodeur de la
-    carte —, le processeur gagne souvent. Résultats en cache."""
+    """Tests once which encoder actually works on this machine, then times the graphics card
+    against the processor on a short animated 1440p60 sample: the fastest is used for exports ("Automatic"
+    setting). Depending on the machine — and the replay recorders already using the card's
+    encoder —, the processor often wins. Results cached."""
     CACHE = os.path.join(CACHE_DIR, "encoders.json")
     SAMPLE = os.path.join(CACHE_DIR, "bench-1440p60.mp4")
 
     def __init__(self):
-        self.best = {}      # encodeur qui fonctionne (carte graphique si possible)
-        self.fastest = {}   # le plus rapide des deux, mesuré
-        self.timings = {}   # secondes pour l'échantillon : {codec: {"gpu": t, "cpu": t}}
+        self.best = {}      # encoder that works (graphics card if possible)
+        self.fastest = {}   # the faster of the two, measured
+        self.timings = {}   # seconds for the sample: {codec: {"gpu": t, "cpu": t}}
         self.signature = self._signature()
         try:
             with open(self.CACHE) as f:
@@ -362,8 +362,8 @@ class EncoderDetector:
         return len(self.best) == len(ENCODERS) and len(self.fastest) == len(ENCODERS)
 
     def get(self, codec):
-        """Encodeur pour un export, selon la préférence « export_encoder » : auto (le plus rapide mesuré),
-        gpu (carte graphique si elle fonctionne) ou cpu (processeur)."""
+        """Encoder for an export, according to the "export_encoder" preference: auto (fastest measured),
+        gpu (graphics card if it works) or cpu (processor)."""
         from clips_common import load_config
         pref = load_config().get("export_encoder", "auto")
         sw = ENCODERS[codec][-1]
@@ -411,14 +411,14 @@ class EncoderDetector:
         next_codec()
 
     def _race(self, done):
-        """Carte graphique contre processeur, codec par codec, sur le même échantillon (décodage compris)."""
+        """Graphics card against processor, codec by codec, on the same sample (decoding included)."""
         todo = [c for c in ENCODERS if c not in self.fastest]
         if not todo:
             done()
             return
         user_done = done
 
-        def done():   # l'échantillon (~100 Mo) ne sert qu'à cette mesure
+        def done():   # the sample (~100 MB) is only used for this measurement
             try:
                 os.remove(self.SAMPLE)
             except OSError:
@@ -442,7 +442,7 @@ class EncoderDetector:
                 return
             codec = todo.pop(0)
             gpu, cpu = self.best[codec], ENCODERS[codec][-1]
-            if gpu[0] == "sw":   # pas de carte graphique utilisable : rien à comparer
+            if gpu[0] == "sw":   # no usable graphics card: nothing to compare
                 self.fastest[codec] = cpu
                 next_codec()
                 return
@@ -455,7 +455,7 @@ class EncoderDetector:
 
             def decide():
                 self.timings[codec] = {k: round(v, 2) for k, v in times.items() if v != float("inf")}
-                # le processeur seulement s'il est nettement plus rapide (il chauffe plus et prend toute la machine)
+                # the processor only if it's clearly faster (it runs hotter and takes over the whole machine)
                 self.fastest[codec] = cpu if times["cpu"] < times["gpu"] * 0.8 else gpu
                 next_codec()
 
@@ -498,7 +498,7 @@ class EncoderDetector:
 ENCODER_DETECTOR = EncoderDetector()
 
 
-# ---------------------------------------------------------------- lecture
+# ---------------------------------------------------------------- playback
 
 def _has_va_decoder(codec):
     name = {"h264": "vah264dec", "hevc": "vah265dec", "av1": "vaav1dec", "vp9": "vavp9dec"}.get(codec)
@@ -506,14 +506,14 @@ def _has_va_decoder(codec):
 
 
 class Player:
-    """Lecture GStreamer.
+    """GStreamer playback.
 
-    - Vidéo : décodage GPU et affichage sans copie (DMABuf) quand VA-API est dispo, sinon via OpenGL.
-    - Audio : une branche par piste avec son propre volume (+ courbe de volume animée), mixées en direct.
+    - Video: GPU decoding and zero-copy display (DMABuf) when VA-API is available, otherwise via OpenGL.
+    - Audio: one branch per track with its own volume (+ animated volume curve), mixed live.
     """
 
     def __init__(self, path, n_audio, vcodec="", on_eos=None, on_error=None, headless=None):
-        if headless is None:   # tests automatiques : ni image ni son
+        if headless is None:   # automated tests: no picture, no sound
             headless = os.environ.get("CLIPS_HEADLESS") == "1"
         self.on_eos = on_eos
         self.on_error = on_error
@@ -521,13 +521,13 @@ class Player:
         self.controls = {}
         self.wanted = {}
         self.duration = 0
-        self.playing = False   # état voulu (get_state de GStreamer est asynchrone)
-        self.segments = None   # passages à jouer à la suite (lecture continue par-dessus les coupes)
+        self.playing = False   # wanted state (GStreamer's get_state is asynchronous)
+        self.segments = None   # sections to play in a row (continuous playback over the cuts)
         self.seg_idx = 0
         self.loop = True
         self.at_end = False
-        self.async_pending = False   # un saut avec vidage est en cours (pipeline pas encore prêt)
-        self.pending_done = False    # fin de segment reçue, enchaînement à faire dès que possible
+        self.async_pending = False   # a flushing seek is in progress (pipeline not ready yet)
+        self.pending_done = False    # end of segment received, move to the next one as soon as possible
         self.pipeline = Gst.Pipeline.new("clips-player")
 
         src = Gst.ElementFactory.make("filesrc")
@@ -537,7 +537,7 @@ class Player:
         self.pipeline.add(demux)
         src.link(demux)
 
-        if headless:   # tests : aucune fenêtre ni aucun son
+        if headless:   # tests: no window and no sound
             self.sink = Gst.ElementFactory.make("fakesink")
             self.sink.props.sync = True
             self.paintable = None
@@ -548,7 +548,7 @@ class Player:
         if headless:
             pass
         elif _has_va_decoder(vcodec):
-            # Zéro copie : le décodeur VA livre des DMABuf que GTK affiche directement.
+            # Zero copy: the VA decoder delivers DMABufs that GTK displays directly.
             self.video_sink = self.sink
         elif self.paintable.props.gl_context:
             self.video_sink = Gst.ElementFactory.make("glsinkbin")
@@ -563,8 +563,8 @@ class Player:
         self.pipeline.add(self.video_sink)
         self.video_linked = False
 
-        # Une sortie audio par piste (PipeWire fait le mélange) : pas d'« audiomixer », qui jette du son
-        # quand on enchaîne les passages gardés sans vider le pipeline.
+        # One audio output per track (PipeWire does the mixing): no "audiomixer", which drops audio
+        # when chaining the kept sections without flushing the pipeline.
         self.headless = headless
         self.has_audio = bool(n_audio)
         self.audio_sinks = []
@@ -590,7 +590,7 @@ class Player:
                 sink.props.sync = True
             self.volumes[idx] = vol
             self.audio_sinks.append(sink)
-            self.wanted.setdefault(idx, (1.0, False, []))   # volume d'écoute appliqué même sans réglage
+            self.wanted.setdefault(idx, (1.0, False, []))   # monitor volume applied even without a setting
             self._apply(idx)
             for e in (conv, res, vol, sink):
                 self.pipeline.add(e)
@@ -628,7 +628,7 @@ class Player:
             err, _dbg = msg.parse_error()
             self.on_error(err.message)
 
-    monitor = 1.0   # volume d'écoute (aperçu seulement) : multiplie chaque piste, n'entre jamais dans l'export
+    monitor = 1.0   # monitor volume (preview only): multiplies each track, never goes into the export
 
     def set_monitor(self, volume):
         self.monitor = max(0.0, float(volume))
@@ -637,7 +637,7 @@ class Player:
             self._apply(idx)
 
     def set_track(self, idx, gain, mute, points=None):
-        """gain : volume global ; points : [(t, niveau)] pour une courbe de volume (niveau 1.0 = 100 %)."""
+        """gain: overall volume; points: [(t, level)] for a volume curve (level 1.0 = 100 %)."""
         self.wanted[idx] = (gain, mute, list(points or []))
         if idx in self.volumes:
             self._apply(idx)
@@ -657,7 +657,7 @@ class Player:
                 ctl = self.controls[idx] = (cs, binding)
             cs = ctl[0]
             cs.unset_all()
-            # Valeurs tenues avant le premier et après le dernier point.
+            # Values held before the first and after the last point.
             pts = [(0.0, points[0][1])] + points + [(points[-1][0] + 36000, points[-1][1])]
             for t, v in pts:
                 cs.set(int(max(t, 0) * Gst.SECOND), gain * v)
@@ -680,7 +680,7 @@ class Player:
         return pos / Gst.SECOND if ok else 0.0
 
     def seek(self, t, accurate=True):
-        """Saut simple (pause, glissement de la tête de lecture) : quitte le mode segments."""
+        """Plain seek (pause, dragging the playhead): leaves segment mode."""
         self.segments = None
         self.at_end = False
         self.pending_done = False
@@ -689,8 +689,8 @@ class Player:
         self.pipeline.seek_simple(Gst.Format.TIME, flags, int(max(0, t) * Gst.SECOND))
 
     def play_segments(self, segments, start, loop):
-        """Joue les passages gardés à la suite, sans arrêt : chaque fin de segment (SEGMENT_DONE)
-        enchaîne sur le suivant avec un saut non bloquant (sans vider le pipeline)."""
+        """Plays the kept sections in a row, without stopping: each end of segment (SEGMENT_DONE)
+        chains to the next one with a non-blocking seek (without flushing the pipeline)."""
         self.segments, self.loop, self.at_end = list(segments), loop, False
         idx = next((i for i, (a, b) in enumerate(self.segments) if start < b - 0.03), None)
         if idx is None:
@@ -708,8 +708,8 @@ class Player:
                            Gst.SeekType.SET, int(b * Gst.SECOND))
 
     def _maybe_next(self):
-        """Un segment court peut être lu avant même que la lecture démarre : enchaîner pendant la mise en
-        route du pipeline le bloque. On attend donc qu'il soit prêt ET en lecture."""
+        """A short segment can be read even before playback starts: chaining while the pipeline is
+        starting up blocks it. So wait until it is ready AND playing."""
         if (self.pending_done and not self.async_pending
                 and self.pipeline.get_state(0)[1] == Gst.State.PLAYING):
             self.pending_done = False
@@ -718,7 +718,7 @@ class Player:
     def _next_segment(self):
         if not self.segments:
             return
-        # Le message arrive quand le segment est lu (pas encore joué) : la file continue sans coupure.
+        # The message arrives when the segment has been read (not yet played): the queue continues seamlessly.
         self.seg_idx += 1
         if self.seg_idx >= len(self.segments):
             if not self.loop:
@@ -741,9 +741,9 @@ class Player:
 # ---------------------------------------------------------------- export
 
 def envelope_expr(points, gain, offset):
-    """Expression ffmpeg (fonction de t) pour une courbe de volume linéaire par morceaux.
+    """ffmpeg expression (function of t) for a piecewise-linear volume curve.
 
-    t est le temps de sortie après « -ss offset » ; les points sont en temps d'origine du clip.
+    t is the output time after "-ss offset"; the points are in the clip's original time.
     """
     T = f"(t+{offset:.4f})"
     if not points:
@@ -759,16 +759,16 @@ def envelope_expr(points, gain, offset):
 
 
 class Exporter:
-    """Export ffmpeg : passages retirés, courbes de volume, mise à l'échelle, encodage GPU (repli CPU auto).
+    """ffmpeg export: removed sections, volume curves, scaling, GPU encoding (automatic CPU fallback).
 
-    segments : [(début, fin)] à garder, en temps d'origine, triés.
-    tracks   : [{"gain", "muted", "points"}] par piste audio du fichier.
+    segments: [(start, end)] to keep, in original time, sorted.
+    tracks  : [{"gain", "muted", "points"}] per audio track of the file.
     """
     force_sw = False
 
-    TARGET_LUFS = -14.0   # niveau habituel YouTube / réseaux
-    TRUE_PEAK = -1.0      # marge anti-saturation (dBTP)
-    LIMITER_DB = 6.0      # gain maximal confié au limiteur
+    TARGET_LUFS = -14.0   # usual YouTube / social media level
+    TRUE_PEAK = -1.0      # anti-clipping headroom (dBTP)
+    LIMITER_DB = 6.0      # maximum gain handed to the limiter
 
     def __init__(self, src, out, segments, height, fps, codec, target_mb, qp, tracks, copy,
                  on_progress, on_done, normalize=False, audio_only=False, screens=None, plan=None):
@@ -778,8 +778,8 @@ class Exporter:
         self.height, self.fps, self.codec = height, fps, codec
         self.target_mb, self.qp = target_mb, qp
         self.tracks, self.copy = tracks, copy
-        self.audio_only = audio_only   # MP3 du mix (gains, courbes, coupes, normalisation), sans vidéo
-        # Plusieurs écrans : morceaux (début, fin, écran) et fichiers des écrans ({"path", "offset"}).
+        self.audio_only = audio_only   # MP3 of the mix (gains, curves, cuts, normalization), no video
+        # Several screens: pieces (start, end, screen) and the screens' files ({"path", "offset"}).
         self.screens, self.plan = screens or [], plan
         self.multi_screen = bool(plan) and any(k for _s, _e, k in plan)
         self.on_progress, self.on_done = on_progress, on_done
@@ -789,7 +789,7 @@ class Exporter:
         self.bitrate_scale = 1.0
         self.backend = None
         self.normalize = normalize and not copy
-        self.norm_gain = None   # dB, calculé par une passe d'analyse audio (rapide, sans vidéo)
+        self.norm_gain = None   # dB, computed by an audio analysis pass (fast, no video)
         self.limit = False
 
     def start(self):
@@ -799,8 +799,8 @@ class Exporter:
         self._encode()
 
     def _analyze(self):
-        """Passe 1 : mesure du mix (loudnorm) → gain fixe = cible − niveau, plafonné par la crête vraie.
-        Un gain fixe ne « pompe » pas, contrairement à une normalisation dynamique."""
+        """Pass 1: measure the mix (loudnorm) → fixed gain = target − level, capped by the true peak.
+        A fixed gain doesn't "pump", unlike dynamic normalization."""
         A, B = self.segments[0][0], self.segments[-1][1]
         graph, label = self._audio_graph(A, video=False)
         argv = ["ffmpeg", "-v", "info", "-nostdin", "-hide_banner", "-ss", f"{A:.3f}", "-t", f"{B - A:.3f}",
@@ -817,7 +817,7 @@ class Exporter:
                 js = json.loads(err[err.rindex("{"):err.rindex("}") + 1])
                 i, tp = float(js["input_i"]), float(js["input_tp"])
                 if i > -70:
-                    # Jusqu'à 6 dB au-delà de la crête : le limiteur écrête alors seulement les pics isolés.
+                    # Up to 6 dB beyond the peak: the limiter then only clips isolated peaks.
                     self.norm_gain = max(min(self.TARGET_LUFS - i, self.TRUE_PEAK - tp + self.LIMITER_DB, 30.0), -20.0)
                     self.limit = self.norm_gain > self.TRUE_PEAK - tp
             except (ValueError, KeyError):
@@ -875,15 +875,15 @@ class Exporter:
         if not proc.get_successful():
             err = proc.get_stderr_pipe().read_bytes(65536, None).get_data().decode(errors="replace").strip()
             if self.backend[0] not in ("sw", "copy", "audio"):
-                Exporter.force_sw = True   # repli processeur pour cette session
+                Exporter.force_sw = True   # processor fallback for this session
                 self._encode()
                 return
             self._cleanup()
-            self.on_done(False, err.splitlines()[-1] if err else "échec de ffmpeg")
+            self.on_done(False, err.splitlines()[-1] if err else "ffmpeg failed")
             return
         size = os.path.getsize(self.out)
         if self.target_mb and size > self.target_mb * 1e6 and self.attempt < 2:
-            # Le débit VBR des encodeurs GPU n'est pas exact : on recommence un peu plus bas.
+            # The VBR bitrate of GPU encoders isn't exact: try again a bit lower.
             self.attempt += 1
             self.bitrate_scale *= (self.target_mb * 1e6) / size * 0.92
             self.on_progress(0)
@@ -909,7 +909,7 @@ class Exporter:
         A, B = self.segments[0][0], self.segments[-1][1]
         a = ["ffmpeg", "-v", "error", "-nostdin", "-y", "-progress", "pipe:1", "-nostats"]
         if self.audio_only:
-            graph, label = self._audio_graph(A, video=True)   # video=True : gain de normalisation compris
+            graph, label = self._audio_graph(A, video=True)   # video=True: normalization gain included
             return a + ["-ss", f"{A:.3f}", "-t", f"{B - A:.3f}", "-i", self.src, "-filter_complex", ";".join(graph),
                         "-map", label, "-c:a", "libmp3lame", "-b:a", "192k", self.out]
         if self.multi_screen:
@@ -918,8 +918,8 @@ class Exporter:
             a += ["-ss", f"{A:.3f}", "-t", f"{B - A:.3f}", "-i", self.src]
             active = self._active()
             if len(self.tracks) > 1 and active:
-                # Original : rien n'est réencodé sauf un mix des pistes, placé en 1re piste (celle que lisent
-                # Discord, les navigateurs…) ; les pistes séparées suivent, intactes, pour un logiciel de montage.
+                # Original: nothing is re-encoded except a mix of the tracks, placed as the 1st track (the one
+                # Discord, browsers… play); the separate tracks follow, untouched, for an editing program.
                 graph = [f"[0:a:{i}]volume='{envelope_expr(t['points'], t['gain'], A)}':eval=frame[t{i}]"
                          for i, t in active]
                 graph.append("".join(f"[t{i}]" for i, _ in active) +
@@ -936,7 +936,7 @@ class Exporter:
         kind, enc = self.backend
         multi = len(self.segments) > 1
         node = render_node()
-        zero_copy = kind == "vaapi" and not multi   # décodage → mise à l'échelle → encodage, tout sur le GPU
+        zero_copy = kind == "vaapi" and not multi   # decoding → scaling → encoding, all on the GPU
         if kind == "vaapi":
             a += ["-init_hw_device", f"vaapi=va:{node}", "-filter_hw_device", "va",
                   "-hwaccel", "vaapi", "-hwaccel_device", "va"]
@@ -955,7 +955,7 @@ class Exporter:
         audio_graph, audio = self._audio_graph(A, video=True)
         graph += audio_graph
 
-        # passages retirés : découpe vidéo + concaténation (l'audio est déjà découpé dans _audio_graph)
+        # removed sections: video trim + concatenation (the audio is already trimmed in _audio_graph)
         video = "[0:v:0]"
         if multi:
             graph.append(f"{video}split={n}" + "".join(f"[vs{k}]" for k in range(n)))
@@ -986,13 +986,13 @@ class Exporter:
         return a
 
     def _argv_screens(self, a, A, B):
-        """Montage multi-écrans : chaque morceau vient de son fichier (recalé de son décalage), mis à la taille
-        du clip, puis enchaînés ; le son vient du clip (1er écran)."""
+        """Multi-screen edit: each piece comes from its file (realigned by its offset), resized to the
+        clip's size, then chained; the audio comes from the clip (1st screen)."""
         kind, enc = self.backend
         hw = []
         if kind == "vaapi":
             a += ["-init_hw_device", f"vaapi=va:{render_node()}", "-filter_hw_device", "va"]
-            hw = ["-hwaccel", "vaapi", "-hwaccel_device", "va"]   # décodage GPU, images rapatriées pour le montage
+            hw = ["-hwaccel", "vaapi", "-hwaccel_device", "va"]   # GPU decoding, frames brought back for the edit
         elif kind == "nvenc":
             hw = ["-hwaccel", "cuda"]
         elif kind == "qsv":
@@ -1002,7 +1002,7 @@ class Exporter:
         W = int(round(H * w0 / h0 / 2)) * 2
         fps = self.fps or fps0
         used = sorted({k for _s, _e, k in self.plan})
-        base = {}   # écran → (n° d'entrée ffmpeg, instant du clip qui correspond à son image 0)
+        base = {}   # screen → (ffmpeg input no., clip time matching its frame 0)
         a += hw + ["-ss", f"{A:.3f}", "-t", f"{B - A:.3f}", "-i", self.src]
         base[0] = (0, A)
         for k in used:
@@ -1041,8 +1041,8 @@ class Exporter:
         return a + ["-movflags", "+faststart", self.out]
 
     def _audio_graph(self, A, video):
-        """Volume (ou courbe) par piste → mix → découpe des passages → gain de normalisation.
-        Retourne (filtres, étiquette de sortie) ; ([], None) s'il n'y a aucune piste active."""
+        """Volume (or curve) per track → mix → trim of the sections → normalization gain.
+        Returns (filters, output label); ([], None) if there is no active track."""
         active = self._active()
         if not active:
             return [], None

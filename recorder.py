@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Lance gpu-screen-recorder en mode replay selon ~/.config/clips/config.json.
+"""Runs gpu-screen-recorder in replay mode according to ~/.config/clips/config.json.
 
-Démarré par clips-recorder.service ; SIGUSR1 sur le processus principal sauvegarde un clip.
-Le canal de commande (-ipc) sert à l'enregistrement manuel (record-clip start / stop), écrit dans -ro.
-Avec d'autres écrans (extra_monitors), un enregistreur par écran tourne en parallèle et ce script relaie
-les signaux.
+Started by clips-recorder.service; SIGUSR1 on the main process saves a clip.
+The command channel (-ipc) is used for manual recording (record-clip start / stop), written to -ro.
+With other screens (extra_monitors), one recorder per screen runs in parallel and this script relays
+the signals.
 """
 import os
 import sys
@@ -34,9 +34,9 @@ def base_cmd(monitor, out_dir, sock):
         "-ro", out_dir,
         "-ipc", sock,
     ]
-    if extras:   # horodatage de la 1re image : aligne les écrans d'un enregistrement manuel
+    if extras:   # timestamp of the 1st frame: aligns the screens of a manual recording
         cmd += ["-write-first-frame-ts", "yes"]
-    # Socket d'une exécution précédente : gpu-screen-recorder ne pourrait pas l'ouvrir.
+    # Socket left over from a previous run: gpu-screen-recorder could not open it.
     try:
         os.remove(sock)
     except OSError:
@@ -44,24 +44,24 @@ def base_cmd(monitor, out_dir, sock):
     return cmd
 
 
-# Écran principal : le son (chaque -a = une piste séparée, mixable ensuite dans l'éditeur) et on_save.py,
-# qui renomme le clip et y rattache les autres écrans.
+# Main screen: the audio (each -a = a separate track, mixable later in the editor) and on_save.py,
+# which renames the clip and attaches the other screens to it.
 cmd = base_cmd(cfg["monitor"], cfg["clips_dir"], GSR_SOCKET)
 cmd += ["-ac", "aac", "-sc", os.path.join(APP_DIR, "on_save.py")]
 tracks = audio_tracks(cfg)
 for t in tracks:
     cmd += ["-a", t["source"]]
-# Mémorise l'ordre des pistes : on_save.py le recopie à côté de chaque clip.
+# Remember the track order: on_save.py copies it next to each clip.
 write_recording(tracks)
-set_manual_recording(None)   # un enregistrement manuel ne survit pas à un redémarrage du replay
+set_manual_recording(None)   # a manual recording does not survive a replay restart
 
 if not extras:
-    # exec : gpu-screen-recorder devient le processus principal du service,
-    # ce qui permet à « systemctl --user kill -s USR1 » de le viser directement.
+    # exec: gpu-screen-recorder becomes the service's main process,
+    # which lets "systemctl --user kill -s USR1" target it directly.
     os.execvp(cmd[0], cmd)
 
-# Plusieurs écrans : ce script reste le processus principal et relaie la sauvegarde (USR1) à tous les
-# enregistreurs. Chaque autre écran (sans son) écrit dans .screens/incoming/<écran>/ ; on_save.py l'y reprend.
+# Several screens: this script stays the main process and relays the save (USR1) to all the
+# recorders. Each other screen (no audio) writes to .screens/incoming/<screen>/; on_save.py picks it up there.
 import signal  # noqa: E402
 import subprocess  # noqa: E402
 
@@ -81,7 +81,7 @@ def forward(sig, _frame):
 for sig in (signal.SIGUSR1, signal.SIGINT, signal.SIGTERM):
     signal.signal(sig, forward)
 
-# Si un enregistreur s'arrête, on arrête l'autre : systemd relance l'ensemble.
+# If one recorder stops, stop the others: systemd restarts the whole thing.
 code = None
 while code is None:
     try:

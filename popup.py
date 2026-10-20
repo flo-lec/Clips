@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Encart « Clip enregistré » affiché par-dessus le jeu (couche « overlay » de Wayland, gtk4-layer-shell).
+""""Clip saved" toast shown on top of the game (Wayland "overlay" layer, gtk4-layer-shell).
 
-Ne prend jamais le focus clavier et laisse passer les clics : le jeu n'est pas dérangé.
-Usage : popup.py <chemin du clip> [jeu] [regular|replay]
-        popup.py --message <titre> [sous-titre]     (ex. « Enregistrement lancé »)
+Never takes keyboard focus and lets clicks through: the game is not disturbed.
+Usage: popup.py <clip path> [game] [regular|replay]
+       popup.py --message <title> [subtitle]     (e.g. "Recording started")
 """
 import os
 import sys
 from ctypes import CDLL
 
-# gtk4-layer-shell doit être chargé avant GTK.
+# gtk4-layer-shell must be loaded before GTK.
 CDLL("libgtk4-layer-shell.so")
 
 import cairo  # noqa: E402
@@ -50,14 +50,14 @@ def duration_label(path):
 
 def main():
     message = len(sys.argv) > 1 and sys.argv[1] == "--message"
-    if message:   # simple encart texte (enregistrement manuel lancé…), pastille rouge
+    if message:   # plain text toast (manual recording started…), red dot
         path, game, kind = "", None, None
         title, sub = sys.argv[2] if len(sys.argv) > 2 else "", sys.argv[3] if len(sys.argv) > 3 else ""
     else:
         path = sys.argv[1] if len(sys.argv) > 1 else ""
         game = sys.argv[2] if len(sys.argv) > 2 and sys.argv[2] else None
         kind = sys.argv[3] if len(sys.argv) > 3 else "replay"
-        title = "Enregistrement sauvegardé" if kind == "regular" else "Clip enregistré"
+        title = "Recording saved" if kind == "regular" else "Clip saved"
         sub = None
     cfg = load_config()
     info = load_clip_info(path) if path else {}
@@ -72,7 +72,7 @@ def main():
     LayerShell.init_for_window(win)
     LayerShell.set_namespace(win, "clips-popup")
     LayerShell.set_layer(win, LayerShell.Layer.OVERLAY)
-    LayerShell.set_keyboard_mode(win, LayerShell.KeyboardMode.NONE)   # jamais de focus
+    LayerShell.set_keyboard_mode(win, LayerShell.KeyboardMode.NONE)   # never any focus
     LayerShell.set_anchor(win, LayerShell.Edge.TOP, True)
     LayerShell.set_anchor(win, LayerShell.Edge.RIGHT, True)
     LayerShell.set_margin(win, LayerShell.Edge.TOP, 28)
@@ -80,7 +80,7 @@ def main():
     monitors = Gdk.Display.get_default().get_monitors()
     for i in range(monitors.get_n_items()):
         m = monitors.get_item(i)
-        if m.get_connector() == cfg.get("monitor"):   # l'écran filmé (celui du jeu)
+        if m.get_connector() == cfg.get("monitor"):   # the recorded screen (the game's)
             LayerShell.set_monitor(win, m)
 
     box = Gtk.Box(spacing=12, css_classes=["clip-popup"])
@@ -104,7 +104,7 @@ def main():
     def click_through(*_):
         surface = win.get_surface()
         if surface:
-            surface.set_input_region(cairo.Region())   # les clics traversent l'encart
+            surface.set_input_region(cairo.Region())   # clicks go through the toast
 
     win.connect("realize", click_through)
     win.set_opacity(0)

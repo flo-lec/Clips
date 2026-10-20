@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Enregistrement manuel, en plus du replay : record-clip start | stop | toggle.
+"""Manual recording, on top of the replay: record-clip start | stop | toggle.
 
-Raccourcis globaux : Alt+F9 démarre, Alt+F11 arrête (setup_shortcut.py). Passe par le canal de commande du
-gpu-screen-recorder du replay (aucun second encodage) ; à l'arrêt, gpu-screen-recorder écrit le fichier puis lance
-on_save.py comme pour un replay (renommage selon le jeu, pistes, popup, son).
+Global shortcuts: Alt+F9 starts, Alt+F11 stops (setup_shortcut.py). Goes through the command channel of the
+replay's gpu-screen-recorder (no second encode); on stop, gpu-screen-recorder writes the file then runs
+on_save.py just like for a replay (renaming after the game, tracks, popup, sound).
 """
 import os
 import subprocess
@@ -16,7 +16,7 @@ from clips_common import (APP_DIR, extra_monitors, extra_socket, gsr_request, la
 
 
 def tell(title, body="", icon="media-record", sound=None, popup=False):
-    """Retour discret pendant le jeu : son, puis encart par-dessus le jeu ou notification selon les réglages."""
+    """Discreet feedback while gaming: sound, then a toast over the game or a notification depending on settings."""
     cfg = load_config()
     if sound and cfg.get("save_sound", True):
         play_sound(sound, cfg.get("sound_volume", 70))
@@ -39,26 +39,26 @@ def videos(folder):
 
 def start():
     if manual_recording_started() is not None:
-        tell("Enregistrement déjà en cours", f"{shortcut_label('rec_stop')} pour l'arrêter", popup=True)
+        tell("Already recording", f"{shortcut_label('rec_stop')} to stop it", popup=True)
         return 0
     folder = load_config()["clips_dir"]
     before = set(videos(folder))
     ok, data = gsr_request("start-replay-recording")
-    if ok:   # autres écrans (sans son) : alignés ensuite grâce à l'horodatage de leur 1re image
+    if ok:   # other screens (no audio): aligned afterwards thanks to the timestamp of their 1st frame
         for mon in extra_monitors(load_config()):
             gsr_request("start-replay-recording", sock_path=extra_socket(mon))
     if ok is None:
-        tell("Clips", "Le replay n'est pas actif : active-le dans l'appli Clips pour pouvoir enregistrer.",
+        tell("Clips", "The replay is not running: turn it on in the Clips app to be able to record.",
              icon="dialog-warning")
         return 1
     if not ok:
-        tell("Impossible de démarrer l'enregistrement", str(data or ""), icon="dialog-error")
+        tell("Could not start the recording", str(data or ""), icon="dialog-error")
         return 1
     started = time.time()
     set_manual_recording(started)
-    tell("Enregistrement lancé", f"{shortcut_label('rec_stop')} pour l'arrêter", sound="highlight", popup=True)
-    # Le fichier apparaît dans le dossier dès le début : on le note pour que la bibliothèque l'affiche « En cours »
-    # (grisé, pas encore lisible) au lieu d'un clip incomplet.
+    tell("Recording started", f"{shortcut_label('rec_stop')} to stop it", sound="highlight", popup=True)
+    # The file shows up in the folder right from the start: note it so the library shows it as "Recording"
+    # (greyed out, not playable yet) instead of an incomplete clip.
     for _ in range(40):
         new = [p for p in videos(folder) if p not in before and not os.path.basename(p).startswith("Replay_")]
         if new:
@@ -70,23 +70,23 @@ def start():
 
 def stop():
     started = manual_recording_started()
-    # Réponse envoyée une fois le fichier écrit (et on_save.py lancé) : on laisse le temps aux longues vidéos.
-    # Autres écrans d'abord : leurs fichiers sont complets quand on_save.py (lancé par l'écran principal)
-    # les rattache.
+    # Reply sent once the file is written (and on_save.py started): give long videos time.
+    # Other screens first: their files are complete when on_save.py (started by the main screen)
+    # attaches them.
     for mon in extra_monitors(load_config()):
         gsr_request("stop-replay-recording", timeout=120, sock_path=extra_socket(mon))
     ok, data = gsr_request("stop-replay-recording", timeout=120)
     set_manual_recording(None)
     if ok is None:
-        tell("Clips", "Le replay n'est pas actif.", icon="dialog-warning")
+        tell("Clips", "The replay is not running.", icon="dialog-warning")
         return 1
     if not ok:
         if started is None:
-            tell("Aucun enregistrement en cours", f"{shortcut_label('rec_start')} pour en lancer un", popup=True)
+            tell("No recording in progress", f"{shortcut_label('rec_start')} to start one", popup=True)
         else:
-            tell("Échec de l'arrêt de l'enregistrement", str(data or ""), icon="dialog-error")
+            tell("Failed to stop the recording", str(data or ""), icon="dialog-error")
         return 1
-    return 0   # la suite (popup « Enregistrement sauvegardé », son) est faite par on_save.py
+    return 0   # the rest ("Recording saved" popup, sound) is done by on_save.py
 
 
 if __name__ == "__main__":

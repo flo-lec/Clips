@@ -1,4 +1,4 @@
-"""Configuration partagée entre l'appli Clips, le service d'enregistrement et les scripts."""
+"""Configuration shared between the Clips app, the recording service and the scripts."""
 import copy
 import functools
 import glob
@@ -9,32 +9,32 @@ import subprocess
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_DIR = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")), "clips")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
-RECORDING_FILE = os.path.join(CONFIG_DIR, "recording.json")   # pistes du replay en cours
+RECORDING_FILE = os.path.join(CONFIG_DIR, "recording.json")   # tracks of the running replay
 CACHE_DIR = os.path.join(os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")), "clips")
 SERVICE = "clips-recorder.service"
 
-# Enregistrement manuel (en plus du replay) : le service ouvre un canal de commande (IPC) de gpu-screen-recorder.
-# Les variables CLIPS_* ne servent qu'aux tests (autre instance, autre dossier).
+# Manual recording (on top of the replay): the service opens a gpu-screen-recorder command channel (IPC).
+# The CLIPS_* variables are only used for tests (another instance, another folder).
 RUNTIME_DIR = os.environ.get("CLIPS_RUNTIME_DIR") or os.environ.get("XDG_RUNTIME_DIR") or f"/tmp/clips-{os.getuid()}"
 GSR_SOCKET = os.path.join(RUNTIME_DIR, "clips-gsr.sock")
 
 
 def extra_socket(monitor):
-    """Canal de commande de l'enregistreur d'un écran supplémentaire."""
+    """Command channel of an extra screen's recorder."""
     return os.path.join(RUNTIME_DIR, f"clips-gsr-{monitor}.sock")
-REC_STATE = os.path.join(RUNTIME_DIR, "clips-manual-recording.json")   # présent = enregistrement en cours
+REC_STATE = os.path.join(RUNTIME_DIR, "clips-manual-recording.json")   # present = recording in progress
 
-# Raccourcis globaux (installés par setup_shortcut.py, modifiables ensuite dans les réglages du bureau).
+# Global shortcuts (installed by setup_shortcut.py, can be changed later in the desktop settings).
 SHORTCUTS = {"save": "<Alt>F10", "rec_start": "<Alt>F9", "rec_stop": "<Alt>F11"}
 
 
 def shortcut_label(key):
-    return SHORTCUTS[key].replace("<Alt>", "Alt+").replace("<Control>", "Ctrl+").replace("<Shift>", "Maj+")
+    return SHORTCUTS[key].replace("<Alt>", "Alt+").replace("<Control>", "Ctrl+").replace("<Shift>", "Shift+")
 
 
 def gsr_request(name, timeout=5.0, sock_path=GSR_SOCKET):
-    """Envoie une requête au gpu-screen-recorder du replay. Retourne (ok, données ou message d'erreur).
-    ok vaut None si le replay n'écoute pas (service arrêté)."""
+    """Sends a request to the replay's gpu-screen-recorder. Returns (ok, data or error message).
+    ok is None if the replay is not listening (service stopped)."""
     import socket
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
@@ -48,18 +48,18 @@ def gsr_request(name, timeout=5.0, sock_path=GSR_SOCKET):
                     break
                 buf += chunk
     except (FileNotFoundError, ConnectionRefusedError):
-        return None, "Le replay n'est pas actif"
+        return None, "The replay is not running"
     except OSError as e:
         return False, str(e)
     try:
         reply = json.loads(buf.decode().strip().splitlines()[-1])
     except (ValueError, IndexError):
-        return False, "Réponse illisible de gpu-screen-recorder"
+        return False, "Unreadable reply from gpu-screen-recorder"
     return reply.get("result") == "ok", reply.get("data")
 
 
 def manual_recording_started():
-    """Heure de début (time.time()) de l'enregistrement manuel en cours, sinon None."""
+    """Start time (time.time()) of the manual recording in progress, otherwise None."""
     try:
         with open(REC_STATE) as f:
             return float(json.load(f)["started"])
@@ -68,7 +68,7 @@ def manual_recording_started():
 
 
 def manual_recording_path():
-    """Fichier en cours d'écriture par l'enregistrement manuel (affiché « En cours » dans la bibliothèque)."""
+    """File being written by the manual recording (shown as "Recording" in the library)."""
     try:
         with open(REC_STATE) as f:
             return json.load(f).get("path")
@@ -86,24 +86,24 @@ def set_manual_recording(started, path=None):
         os.makedirs(RUNTIME_DIR, exist_ok=True)
         _write_json(REC_STATE, {"started": started, "path": path})
 
-# Les trois sources façon Moments, dans l'ordre des pistes du fichier.
+# The three Moments-style sources, in the order of the file's tracks.
 SOURCE_KINDS = ["game", "chat", "mic"]
-SOURCE_LABELS = {"game": "Jeu", "chat": "Chat vocal", "mic": "Micro"}
+SOURCE_LABELS = {"game": "Game", "chat": "Voice chat", "mic": "Mic"}
 SOURCE_ICONS = {"game": "input-gaming-symbolic", "chat": "user-available-symbolic",
                 "mic": "audio-input-microphone-symbolic", "app": "applications-multimedia-symbolic",
                 "other": "applications-multimedia-symbolic"}
 
 
-# Noms sous lesquels les clients de chat vocal apparaissent dans PipeWire (insensible à la casse).
+# Names under which voice chat clients show up in PipeWire (case-insensitive).
 CHAT_APPS = ["vesktop", "discord", "WEBRTC VoiceEngine", "webcord", "legcord", "armcord",
              "TeamSpeak", "Mumble", "Element", "Slack", "zoom"]
 
 
 OCEAN = "/usr/share/sounds/ocean/stereo"
 SOUNDS = [
-    ("success", "Succès", f"{OCEAN}/completion-success.oga"),
-    ("outcome", "Réussite", f"{OCEAN}/outcome-success.oga"),
-    ("sent", "Envoi", f"{OCEAN}/message-sent-instant.oga"),
+    ("success", "Success", f"{OCEAN}/completion-success.oga"),
+    ("outcome", "Achievement", f"{OCEAN}/outcome-success.oga"),
+    ("sent", "Sent", f"{OCEAN}/message-sent-instant.oga"),
     ("highlight", "Message", f"{OCEAN}/message-highlight.oga"),
 ]
 
@@ -118,7 +118,7 @@ def sound_path(key):
 
 
 def play_sound(key, volume=None):
-    """volume en % (0–100) ; par défaut celui de la config."""
+    """volume in % (0–100); defaults to the one from the config."""
     path = sound_path(key)
     if volume is None:
         volume = load_config().get("sound_volume", 70)
@@ -128,14 +128,14 @@ def play_sound(key, volume=None):
 
 
 def layer_shell_available():
-    """Le popup par-dessus le jeu nécessite gtk4-layer-shell (couche « overlay » Wayland)."""
+    """The popup over the game requires gtk4-layer-shell (Wayland "overlay" layer)."""
     return bool(glob.glob("/usr/lib*/girepository-1.0/Gtk4LayerShell-1.0.typelib")
                 or glob.glob("/usr/lib/*/girepository-1.0/Gtk4LayerShell-1.0.typelib")) \
         and os.environ.get("WAYLAND_DISPLAY") is not None
 
 
 def render_node():
-    """Nœud de rendu du GPU (pour VAAPI) : le premier /dev/dri/renderD* disponible."""
+    """GPU render node (for VAAPI): the first available /dev/dri/renderD*."""
     nodes = sorted(glob.glob("/dev/dri/renderD*"))
     return nodes[0] if nodes else None
 
@@ -153,33 +153,33 @@ def _videos_dir():
 DEFAULTS = {
     "clips_dir": os.path.join(_videos_dir(), "Clips"),
     "monitor": "screen",
-    "extra_monitors": [],          # autres écrans filmés en parallèle (sans son) ; le son vient de « monitor »
+    "extra_monitors": [],          # other screens recorded in parallel (no audio); audio comes from "monitor"
     "replay_seconds": 30,
     "fps": 60,
     "quality": "very_high",
     "codec": "h264",
     "discord_limit_mb": 10,
     "save_sound": True,
-    "sound": "success",            # son de confirmation (voir SOUNDS)
+    "sound": "success",            # confirmation sound (see SOUNDS)
     "sound_volume": 70,            # %
-    "save_popup": True,            # encart « Clip enregistré » par-dessus le jeu
-    "save_notification": True,     # notification du bureau (boutons Éditer / Ouvrir le dossier)
-    # game.mode : "except_chat" (tout sauf l'appli de chat) | "all" (tout le son du PC) | "app" (une appli)
+    "save_popup": True,            # "Clip saved" toast over the game
+    "save_notification": True,     # desktop notification (Edit / Open folder buttons)
+    # game.mode: "except_chat" (everything but the chat app) | "all" (all PC audio) | "app" (one app)
     "sources": {
         "game": {"enabled": True, "mode": "except_chat", "app": ""},
         "chat": {"enabled": True, "app": "vesktop"},
         "mic": {"enabled": True, "device": "default_input"},
-        # Avancé : une piste par application listée ; le reste va dans « Autres sons ».
+        # Advanced: one track per listed application; the rest goes to "Other sounds".
         "split": {"enabled": False, "apps": []},
     },
-    # Niveaux par défaut appliqués dans l'éditeur (1.0 = 100 %).
+    # Default levels applied in the editor (1.0 = 100 %).
     "levels": {"game": 1.0, "chat": 0.8, "mic": 1.0},
-    # Éditeur : courbes de volume par piste (mode avancé).
+    # Editor: per-track volume curves (advanced mode).
     "advanced_audio": False,
-    "lane_height": 46,             # hauteur des pistes en mode avancé (px)
-    # Export : normalisation du volume (niveau standard des plateformes, sans saturation).
+    "lane_height": 46,             # track height in advanced mode (px)
+    # Export: volume normalization (standard platform loudness, no clipping).
     "normalize_audio": True,
-    # Détection du jeu (Steam) à la sauvegarde : nom du clip + filtre dans la bibliothèque.
+    # Game detection (Steam) on save: clip name + filter in the library.
     "detect_game": True,
 }
 
@@ -198,7 +198,7 @@ def load_config():
     except (OSError, ValueError):
         raw = {}
     cfg = _merge(DEFAULTS, raw)
-    # Ancien format (v1) : record_system / record_mic.
+    # Old format (v1): record_system / record_mic.
     if "sources" not in raw:
         if "record_system" in raw:
             cfg["sources"]["game"]["enabled"] = raw["record_system"]
@@ -206,7 +206,7 @@ def load_config():
             cfg["sources"]["mic"]["enabled"] = raw["record_mic"]
     for k in ("record_system", "record_mic"):
         cfg.pop(k, None)
-    # Ancien réglage « deuxième écran » (un seul) → liste d'écrans.
+    # Old "second screen" setting (only one) → list of screens.
     second = cfg.pop("monitor2", "")
     if second and "extra_monitors" not in raw:
         cfg["extra_monitors"] = [second]
@@ -214,7 +214,7 @@ def load_config():
 
 
 def extra_monitors(cfg):
-    """Écrans filmés en plus de l'écran principal (sans doublon, jamais l'écran principal)."""
+    """Screens recorded in addition to the main screen (no duplicates, never the main screen)."""
     out = []
     for m in cfg.get("extra_monitors") or []:
         if m and m != cfg["monitor"] and m not in out:
@@ -239,13 +239,13 @@ def exports_dir(cfg):
 
 
 def meta_path(clip_path):
-    """Fichier annexe (caché, à côté des clips) qui décrit les pistes d'un clip."""
+    """Sidecar file (hidden, next to the clips) describing a clip's tracks."""
     d, name = os.path.split(clip_path)
     return os.path.join(d, ".meta", name + ".json")
 
 
 def split_apps(cfg):
-    """Applis à enregistrer chacune sur leur piste (mode avancé), sans l'appli de chat."""
+    """Apps to record each on their own track (advanced mode), excluding the chat app."""
     src = cfg["sources"]
     if not src["split"]["enabled"]:
         return []
@@ -260,9 +260,9 @@ def split_apps(cfg):
 
 
 def audio_tracks(cfg):
-    """Pistes à enregistrer : liste de {kind, label, source} ; source = argument -a de gpu-screen-recorder.
+    """Tracks to record: list of {kind, label, source}; source = gpu-screen-recorder's -a argument.
 
-    Rien n'est rerouté : gpu-screen-recorder ajoute des liens PipeWire en parallèle, tes sorties restent intactes.
+    Nothing is rerouted: gpu-screen-recorder adds PipeWire links in parallel, your outputs stay untouched.
     """
     src = cfg["sources"]
     chat_app = src["chat"]["app"].strip() if src["chat"]["enabled"] else ""
@@ -274,9 +274,9 @@ def audio_tracks(cfg):
             arg, label = f"app:{src['game']['app'].strip()}", SOURCE_LABELS["game"]
         else:
             excluded = ([chat_app] if chat_app and (mode == "except_chat" or apps) else []) + apps
-            # Plusieurs « app-inverse » dans une même piste = tout sauf toutes ces applis.
+            # Several "app-inverse" in the same track = everything except all those apps.
             arg = "|".join(f"app-inverse:{a}" for a in excluded) if excluded else "default_output"
-            label = "Autres sons" if apps else SOURCE_LABELS["game"]
+            label = "Other sounds" if apps else SOURCE_LABELS["game"]
         tracks.append({"kind": "game", "label": label, "source": arg})
     for a in apps:
         tracks.append({"kind": "app", "label": a, "source": f"app:{a}"})
@@ -319,8 +319,8 @@ def load_clip_info(clip_path):
 
 
 def rename_clip(path, new_stem, cfg=None):
-    """Renomme un clip avec son fichier annexe et ses exports. Retourne le nouveau chemin.
-    Lève FileExistsError si le nom est pris, OSError en cas d'échec."""
+    """Renames a clip along with its sidecar file and its exports. Returns the new path.
+    Raises FileExistsError if the name is taken, OSError on failure."""
     new_stem = new_stem.strip().replace("/", "-")
     d, ext = os.path.dirname(path), os.path.splitext(path)[1]
     old_stem = os.path.splitext(os.path.basename(path))[0]
@@ -333,7 +333,7 @@ def rename_clip(path, new_stem, cfg=None):
     os.rename(path, dest)
     if os.path.exists(meta_path(path)):
         os.rename(meta_path(path), meta_path(dest))
-    for f in others:   # autres écrans : <ancien nom>.<écran>.mp4 → <nouveau nom>.<écran>.mp4
+    for f in others:   # other screens: <old name>.<screen>.mp4 → <new name>.<screen>.mp4
         base = os.path.basename(f)
         os.rename(f, os.path.join(os.path.dirname(f), new_stem + base[len(old_stem):]))
     ed = exports_dir(cfg or load_config())
@@ -345,7 +345,7 @@ def rename_clip(path, new_stem, cfg=None):
 
 
 def set_clip_game(clip_path, game, appid=None):
-    """Définit (ou retire, game=None) le jeu d'un clip."""
+    """Sets (or removes, game=None) a clip's game."""
     data = load_clip_info(clip_path)
     data.pop("game", None)
     data.pop("appid", None)
@@ -358,7 +358,7 @@ def set_clip_game(clip_path, game, appid=None):
 
 
 def set_clip_favorite(clip_path, on):
-    """Ajoute/retire le clip des favoris (conservé dans son fichier annexe)."""
+    """Adds/removes the clip from favorites (kept in its sidecar file)."""
     data = load_clip_info(clip_path)
     if on:
         data["favorite"] = True
@@ -367,10 +367,10 @@ def set_clip_favorite(clip_path, on):
     _write_json(meta_path(clip_path), data)
 
 
-# ---------------------------------------------------------------- plusieurs écrans
-# Le 1er écran est le clip lui-même (avec le son). Les autres sont des vidéos sans son rangées dans
-# <dossier des clips>/.screens/<nom du clip>.<écran>.mp4 ; le fichier annexe garde l'écran et le décalage
-# (secondes : l'image 0 de l'écran k correspond à l'instant « offset » du clip).
+# ---------------------------------------------------------------- several screens
+# The 1st screen is the clip itself (with audio). The others are silent videos stored in
+# <clips folder>/.screens/<clip name>.<screen>.mp4; the sidecar file keeps the screen and the offset
+# (seconds: frame 0 of screen k matches the clip's "offset" instant).
 
 def screens_dir(clips_dir):
     return os.path.join(clips_dir, ".screens")
@@ -383,7 +383,7 @@ def screen_file(clip_path, monitor):
 
 
 def clip_screens(clip_path, info=None):
-    """[{"monitor", "path", "offset"}] : le clip lui-même d'abord, puis les écrans en plus encore présents."""
+    """[{"monitor", "path", "offset"}]: the clip itself first, then the extra screens still present."""
     info = load_clip_info(clip_path) if info is None else info
     screens = info.get("screens") or []
     out = [{"monitor": screens[0]["monitor"] if screens else "", "path": clip_path, "offset": 0.0}]
@@ -395,14 +395,14 @@ def clip_screens(clip_path, info=None):
 
 
 def set_clip_screens(clip_path, screens):
-    """screens : [{"monitor", "offset"}], le clip lui-même en premier."""
+    """screens: [{"monitor", "offset"}], the clip itself first."""
     data = load_clip_info(clip_path)
     data["screens"] = screens
     _write_json(meta_path(clip_path), data)
 
 
 def set_clip_field(clip_path, key, value):
-    """Une valeur du fichier annexe (None = retirée)."""
+    """One value of the sidecar file (None = removed)."""
     data = load_clip_info(clip_path)
     if value is None:
         data.pop(key, None)
@@ -412,7 +412,7 @@ def set_clip_field(clip_path, key, value):
 
 
 def set_clip_angles(clip_path, angles):
-    """Bascules d'écran du montage : [[instant, n° d'écran], …] (la 1re à 0)."""
+    """Screen switches of the edit: [[time, screen no.], …] (the 1st one at 0)."""
     data = load_clip_info(clip_path)
     if angles and angles != [[0.0, 0]]:
         data["angles"] = angles
@@ -427,7 +427,7 @@ def clip_angles(clip_path, info=None):
 
 
 def companion_files(clip_path):
-    """Fichiers qui accompagnent un clip (annexe, autres écrans) : à renommer / supprimer avec lui."""
+    """Files that go with a clip (sidecar, other screens): to rename / delete along with it."""
     files = [meta_path(clip_path)]
     files += [screen_file(clip_path, sc["monitor"]) for sc in (load_clip_info(clip_path).get("screens") or [])[1:]]
     return [f for f in files if os.path.exists(f)]
@@ -437,7 +437,7 @@ def load_clip_meta(clip_path):
     return load_clip_info(clip_path).get("tracks", [])
 
 
-# ---------------------------------------------------------------- détection du jeu
+# ---------------------------------------------------------------- game detection
 
 STEAM_ROOTS = ["~/.local/share/Steam", "~/.steam/steam", "~/.var/app/com.valvesoftware.Steam/.local/share/Steam"]
 
@@ -474,8 +474,8 @@ def _steam_name(appid):
 
 
 def detect_game():
-    """Jeu Steam en cours : variable SteamAppId des processus de l'utilisateur (aucune fenêtre touchée).
-    Retourne (nom, appid) ou (None, None)."""
+    """Running Steam game: SteamAppId variable of the user's processes (no window touched).
+    Returns (name, appid) or (None, None)."""
     counts = {}
     uid = os.getuid()
     for pid in os.listdir("/proc"):
@@ -506,7 +506,7 @@ _APPID_BY_NAME = None
 
 
 def steam_appid(name):
-    """Retrouve l'appid d'un jeu installé à partir de son nom (clips plus anciens sans appid)."""
+    """Finds an installed game's appid from its name (older clips without an appid)."""
     global _APPID_BY_NAME
     if _APPID_BY_NAME is None:
         _APPID_BY_NAME = {}
@@ -527,7 +527,7 @@ def steam_appid(name):
 
 @functools.lru_cache(maxsize=256)
 def steam_installed_games():
-    """[(nom, appid)] des jeux Steam installés (sans Proton, runtimes, redistribuables…)."""
+    """[(name, appid)] of installed Steam games (without Proton, runtimes, redistributables…)."""
     skip = ("proton", "steamworks", "steam linux runtime", "redistributable", "soundtrack")
     out = {}
     for lib in _steam_libraries():
@@ -549,8 +549,8 @@ def steam_installed_games():
 
 @functools.lru_cache(maxsize=256)
 def game_art(appid):
-    """Images du jeu déjà en cache chez Steam (rien n'est téléchargé) :
-    icon (32×32), logo (transparent), cover (600×900), header (460×215), hero (fond large)."""
+    """Game images already cached by Steam (nothing is downloaded):
+    icon (32×32), logo (transparent), cover (600×900), header (460×215), hero (wide background)."""
     art = {}
     if not appid:
         return {}
@@ -559,17 +559,17 @@ def game_art(appid):
     for root in STEAM_ROOTS:
         cache = os.path.join(os.path.expanduser(root), "appcache", "librarycache")
         d = os.path.join(cache, str(appid))
-        if os.path.isdir(d):   # format récent : un dossier par jeu
+        if os.path.isdir(d):   # recent format: one folder per game
             for dirpath, _dirs, files in os.walk(d):
                 for f in files:
                     full = os.path.join(dirpath, f)
                     if f in wanted:
                         art.setdefault(wanted[f], full)
                     elif dirpath == d and f.endswith(".jpg") and len(f) == 44:
-                        art.setdefault("icon", full)   # <sha1>.jpg à la racine = icône
+                        art.setdefault("icon", full)   # <sha1>.jpg at the root = icon
         for suffix, key in (("_icon.jpg", "icon"), ("_logo.png", "logo"), ("_library_600x900.jpg", "cover"),
                             ("_header.jpg", "header"), ("_library_hero.jpg", "hero")):
-            f = os.path.join(cache, f"{appid}{suffix}")   # ancien format à plat
+            f = os.path.join(cache, f"{appid}{suffix}")   # old flat format
             if os.path.exists(f):
                 art.setdefault(key, f)
         if art:
